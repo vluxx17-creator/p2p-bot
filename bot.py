@@ -16,7 +16,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8862273506:AAHvSY7aLzmiTr_qnSLm10JzJWKey8TSf
 MASTER_ID = int(os.getenv("MASTER_ID", "8297446667"))
 
 # Баннер (укажи прямую ссылку на картинку)
-BANNER_URL = "https://i.imgur.com/ТВОЯ_ССЫЛКА_НА_БАННЕР.png"
+BANNER_URL = "https://i.imgur.com/MhRGbyB.jpeg"
 
 # Временное хранилище
 users = {}
