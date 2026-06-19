@@ -4,6 +4,7 @@ import os
 import sys
 import signal
 import random
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery, URLInputFile
@@ -16,6 +17,7 @@ from aiogram.client.default import DefaultBotProperties
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8916641100:AAGTlz5A0Xr3ShfmG197dMN6Kp359c-NMxc")
 MASTER_ID = int(os.getenv("MASTER_ID", "8297446667"))
 BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/W4xFfP0j/banner.png")  # ← замени на прямую ссылку
+PORT = int(os.getenv("PORT", 8080))  # Render выдаёт свой порт
 
 users = {}
 deals = {}
@@ -126,7 +128,7 @@ def back_button(lang="ru"):
         [InlineKeyboardButton(text="🔙 Назад" if lang=="ru" else "🔙 Back", callback_data="main_menu")]
     ])
 
-# ---------- УДАЛЕНИЕ СТАРОГО И ОТПРАВКА НОВОГО (чистый чат) ----------
+# ---------- УДАЛЕНИЕ СТАРОГО И ОТПРАВКА НОВОГО ----------
 async def _delete_message(chat_id, msg_id):
     try:
         await bot.delete_message(chat_id, msg_id)
@@ -134,14 +136,12 @@ async def _delete_message(chat_id, msg_id):
         pass
 
 async def delete_and_send(call: CallbackQuery, text: str, reply_markup=None):
-    """Удаляет сообщение с кнопкой и отправляет новое, сохраняет ID нового"""
     await call.answer()
     await _delete_message(call.message.chat.id, call.message.message_id)
     new_msg = await call.message.answer(text, reply_markup=reply_markup)
     users.setdefault(call.from_user.id, {})["last_menu_msg_id"] = new_msg.message_id
 
 async def return_to_main(call: CallbackQuery, lang: str):
-    """Удаляет текущее сообщение и отправляет новое главное меню (с баннером или текстом)"""
     await call.answer()
     await _delete_message(call.message.chat.id, call.message.message_id)
     new_msg = None
@@ -208,14 +208,13 @@ async def complete_deal_logic(deal_id, msg=None, call=None):
         await bot.send_message(buyer_id, f"✅ Сделка #{deal_id} завершена. С вашего баланса списано {amt}₽.")
     except: pass
 
-# ---------- /start (удаляет предыдущее меню) ----------
+# ---------- /start ----------
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     uid = message.from_user.id
     args = message.text.split()
     ref_id = None
 
-    # Вход по ссылке сделки
     if len(args) > 1 and args[1].startswith("deal_"):
         try:
             deal_id = int(args[1].split("_")[1])
@@ -617,12 +616,30 @@ async def handle_rekv_input(message: Message):
         lang = get_lang(uid)
         await message.answer("✅ Сохранено!", reply_markup=main_menu(lang))
 
+# ---------- HTTP-СЕРВЕР ДЛЯ RENDER / UPTIMEROBOT ----------
+async def handle_health(request):
+    return web.Response(text="OK", status=200)
+
+async def run_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logging.info(f"HTTP server started on port {PORT}")
+
 # ---------- ЗАПУСК ----------
 async def main():
-    logging.info("Запуск бота...")
+    logging.info("Запуск бота и HTTP-сервера...")
     try: await bot.session.close()
     except: pass
     await bot.delete_webhook(drop_pending_updates=True)
+
+    # Запускаем HTTP-сервер
+    await run_web_server()
+
+    # Запускаем поллинг бота
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), polling_timeout=20, handle_as_tasks=True)
 
 if __name__ == "__main__":
