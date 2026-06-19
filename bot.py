@@ -5,7 +5,7 @@ import sys
 import signal
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery, FSInputFile, URLInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -14,6 +14,9 @@ from aiogram.client.default import DefaultBotProperties
 # ---------- НАСТРОЙКИ ----------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8862273506:AAHvSY7aLzmiTr_qnSLm10JzJWKey8TSfzU")
 MASTER_ID = int(os.getenv("MASTER_ID", "8297446667"))
+
+# Баннер (укажи прямую ссылку на картинку)
+BANNER_URL = "https://i.imgur.com/ТВОЯ_ССЫЛКА_НА_БАННЕР.png"
 
 # Временное хранилище
 users = {}
@@ -27,6 +30,17 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+# ---------- ТЕКСТ ПРИВЕТСТВИЯ И ГЛАВНОГО МЕНЮ ----------
+WELCOME_TEXT = (
+    "💼 Добро пожаловать в  🤝\n\n"
+    "⚡️ Ваш надёжный P2P-гарант:\n"
+    "1⃣ Автоматические сделки с NFT и подарками\n"
+    "2⃣ 🛡 Полная защита обеих сторон\n"
+    "3⃣ 🪙 Реферальная программа — 50% от комиссии\n"
+    "4⃣ 📦 Передача товаров через менеджера\n\n"
+    "💡 Выберите действие ниже ⬇️"
+)
 
 # ---------- FSM ----------
 class DealStates(StatesGroup):
@@ -134,6 +148,45 @@ def back_button(lang="ru"):
 def get_lang(uid):
     return users.get(uid, {}).get("lang", "ru")
 
+# ---------- ФУНКЦИЯ ОТПРАВКИ БАННЕРА + ТЕКСТА ----------
+async def send_welcome_with_banner(chat_id, lang="ru"):
+    """Отправляет баннер с приветственным текстом и клавиатурой"""
+    try:
+        await bot.send_photo(
+            chat_id=chat_id,
+            photo=URLInputFile(BANNER_URL),
+            caption=WELCOME_TEXT,
+            reply_markup=main_menu(lang)
+        )
+    except Exception as e:
+        logging.warning(f"Не удалось отправить баннер: {e}")
+        # Если баннер не загрузился — отправляем просто текст
+        await bot.send_message(
+            chat_id=chat_id,
+            text=WELCOME_TEXT,
+            reply_markup=main_menu(lang)
+        )
+
+async def edit_to_welcome_with_banner(call: CallbackQuery, lang="ru"):
+    """Редактирует сообщение на баннер с приветственным текстом"""
+    try:
+        # Пробуем заменить фото
+        await call.message.edit_media(
+            media=types.InputMediaPhoto(
+                media=URLInputFile(BANNER_URL),
+                caption=WELCOME_TEXT
+            ),
+            reply_markup=main_menu(lang)
+        )
+    except Exception as e:
+        logging.warning(f"Не удалось обновить баннер: {e}")
+        # Если не вышло — отправляем новый баннер, старый удаляем
+        try:
+            await call.message.delete()
+        except:
+            pass
+        await send_welcome_with_banner(call.from_user.id, lang)
+
 # ---------- КОМАНДЫ ----------
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
@@ -146,16 +199,7 @@ async def cmd_start(message: Message):
             "history": [],
             "pending_rekv": None
         }
-    await message.answer(
-        "💼 Добро пожаловать в  🤝\n\n"
-        "⚡️ Ваш надёжный P2P-гарант:\n"
-        "1⃣ Автоматические сделки с NFT и подарками\n"
-        "2⃣ 🛡 Полная защита обеих сторон\n"
-        "3⃣ 🪙 Реферальная программа — 50% от комиссии\n"
-        "4⃣ 📦 Передача товаров через менеджера\n\n"
-        "💡 Выберите действие ниже ⬇️",
-        reply_markup=main_menu(get_lang(uid))
-    )
+    await send_welcome_with_banner(message.chat.id, get_lang(uid))
 
 @dp.message(Command("masterb"))
 async def master_balance(message: Message):
@@ -201,19 +245,13 @@ async def complete_deal(message: Message):
     except:
         await message.answer("❌ Формат: /giveMas deal_id")
 
+# ---------- ГЛАВНОЕ МЕНЮ (ВОЗВРАТ С БАННЕРОМ) ----------
 @dp.callback_query(F.data == "main_menu")
 async def show_main_menu(call: CallbackQuery):
     uid = call.from_user.id
-    await call.message.edit_text("💼 Добро пожаловать в  🤝
+    await edit_to_welcome_with_banner(call, get_lang(uid))
 
-⚡️ Ваш надёжный P2P-гарант:
-1⃣ Автоматические сделки с NFT и подарками
-2⃣ 🛡 Полная защита обеих сторон
-3⃣ 🪙 Реферальная программа — 50% от комиссии
-4⃣ 📦 Передача товаров через менеджера: @otc_help
-
-💡 Выберите действие ниже ⬇️", reply_markup=main_menu(get_lang(uid)))
-
+# ---------- БАЛАНС ----------
 @dp.callback_query(F.data == "balance_menu")
 async def bal_menu(call: CallbackQuery):
     uid = call.from_user.id
@@ -249,6 +287,7 @@ async def withdraw_funds(call: CallbackQuery):
         reply_markup=back_button(lang)
     )
 
+# ---------- МОИ РЕКВИЗИТЫ ----------
 @dp.callback_query(F.data == "my_rekv")
 async def my_rekv(call: CallbackQuery):
     uid = call.from_user.id
@@ -294,6 +333,7 @@ async def handle_rekv_input(message: Message):
         lang = get_lang(uid)
         await message.answer("✅ Сохранено!" if lang=="ru" else "✅ Saved!", reply_markup=main_menu(lang))
 
+# ---------- СДЕЛКИ ----------
 @dp.callback_query(F.data == "new_deal")
 async def new_deal(call: CallbackQuery, state: FSMContext):
     await state.set_state(DealStates.choosing_role)
@@ -369,11 +409,13 @@ async def search_deal(message: Message):
     except:
         await message.answer("❌ Формат: /search код_сделки")
 
+# ---------- РЕФЕРАЛЫ ----------
 @dp.callback_query(F.data == "referrals")
 async def referrals(call: CallbackQuery):
     lang = get_lang(call.from_user.id)
     await call.message.edit_text("🚧 В разработке" if lang=="ru" else "🚧 In development", reply_markup=back_button(lang))
 
+# ---------- ЯЗЫК ----------
 @dp.callback_query(F.data == "change_lang")
 async def change_lang(call: CallbackQuery):
     uid = call.from_user.id
@@ -382,12 +424,13 @@ async def change_lang(call: CallbackQuery):
     users[uid]["lang"] = new_lang
     await call.message.edit_text("🌐 Язык изменён!" if new_lang=="ru" else "🌐 Language changed!", reply_markup=main_menu(new_lang))
 
+# ---------- ТЕХПОДДЕРЖКА ----------
 @dp.callback_query(F.data == "support")
 async def support(call: CallbackQuery):
     lang = get_lang(call.from_user.id)
     await call.message.edit_text("🆘 Техподдержка: скоро здесь будут контакты менеджера.", reply_markup=back_button(lang))
 
-# ---------- ЗАПУСК С ПРИНУДИТЕЛЬНЫМ СБРОСОМ ----------
+# ---------- ЗАПУСК ----------
 async def main():
     logging.info("Закрываю старые сессии...")
     
