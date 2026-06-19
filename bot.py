@@ -15,7 +15,7 @@ from aiogram.client.default import DefaultBotProperties
 # ---------- НАСТРОЙКИ ----------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8916641100:AAGTlz5A0Xr3ShfmG197dMN6Kp359c-NMxc")
 MASTER_ID = int(os.getenv("MASTER_ID", "8297446667"))
-BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/W4xFfP0j/banner.png")  # ← замени на прямую ссылку
+BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/W4xFfP0j/banner.png")  # ← замени на прямую ссылку с imgbb при желании
 
 users = {}
 deals = {}
@@ -49,7 +49,7 @@ class AdminStates(StatesGroup):
 
 def get_lang(uid): return users.get(uid, {}).get("lang", "ru")
 
-# ---------- ГЛАВНОЕ МЕНЮ (2 кнопки в ряд, последняя одна широкая) ----------
+# ---------- КЛАВИАТУРЫ ----------
 def main_menu(lang="ru"):
     t = {
         "ru": ["💰 Баланс", "📋 Мои сделки", "🤝 Создать сделку",
@@ -96,7 +96,6 @@ def rekv_menu(lang="ru"):
     labels_en = ["💎 TON", "💳 Card", "👤 Username", "⭐ Stars", "💵 USDT", "₿ BTC"]
     labels = labels_ru if lang=="ru" else labels_en
     kb = []
-    # по 3 в ряд для реквизитов (6 кнопок)
     for i in range(0, 6, 3):
         row = [InlineKeyboardButton(text=labels[j], callback_data=f"set_{items[j]}") for j in range(i, min(i+3,6))]
         kb.append(row)
@@ -116,7 +115,6 @@ def currency_choice(lang="ru"):
     cur = [("💎 TON", "ton"), ("💳 Карта", "card"), ("👤 Юзернейм", "username"),
            ("⭐ Звезды", "stars"), ("💵 USDT", "usdt"), ("₿ BTC", "btc")]
     kb = []
-    # по 3 в ряд для валют
     for i in range(0, 6, 3):
         row = [InlineKeyboardButton(text=c[0], callback_data=f"cur_{c[1]}") for c in cur[i:i+3]]
         kb.append(row)
@@ -158,17 +156,44 @@ def deal_status_text(deal):
 
 async def complete_deal_logic(deal_id, msg=None, call=None):
     d = deals[deal_id]
-    sid, amt = d["seller_id"], d["amount"]
-    if sid in users:
-        users[sid]["balance"] += amt
-        users[sid].setdefault("history", []).append(f"✅ Сделка #{deal_id}: +{amt}₽")
+    seller_id = d["seller_id"]
+    buyer_id = d["buyer_id"]
+    amt = d["amount"]
+
+    if seller_id is None or buyer_id is None:
+        txt = "❌ Нельзя завершить сделку: отсутствует продавец или покупатель."
+        if msg: await msg.answer(txt)
+        if call: await call.message.edit_text(txt)
+        return
+
+    # Проверка баланса покупателя
+    buyer_balance = users.get(buyer_id, {}).get("balance", 0)
+    if buyer_balance < amt:
+        txt = f"❌ У покупателя (ID {buyer_id}) недостаточно средств. Баланс: {buyer_balance}₽, требуется: {amt}₽."
+        if msg: await msg.answer(txt)
+        if call: await call.message.edit_text(txt)
+        return
+
+    # Списание с покупателя
+    users[buyer_id]["balance"] -= amt
+    users[buyer_id].setdefault("history", []).append(f"💸 Сделка #{deal_id}: -{amt}₽")
+
+    # Зачисление продавцу
+    if seller_id in users:
+        users[seller_id]["balance"] += amt
+        users[seller_id].setdefault("history", []).append(f"✅ Сделка #{deal_id}: +{amt}₽")
+    else:
+        users[seller_id] = {"balance": amt, "history": [f"✅ Сделка #{deal_id}: +{amt}₽"]}
+
     d["status"] = "completed"
     txt = f"✅ Сделка #{deal_id} завершена. Продавец получил {amt}₽."
     if msg: await msg.answer(txt)
     if call: await call.message.edit_text(txt, reply_markup=admin_menu())
+
+    # Уведомления участникам
     try:
-        await bot.send_message(sid, f"✅ Сделка #{deal_id} завершена! +{amt}₽.")
-        if d["buyer_id"]: await bot.send_message(d["buyer_id"], f"✅ Сделка #{deal_id} завершена.")
+        await bot.send_message(seller_id, f"✅ Сделка #{deal_id} завершена! Вам зачислено {amt}₽.")
+        await bot.send_message(buyer_id, f"✅ Сделка #{deal_id} завершена. С вашего баланса списано {amt}₽.")
     except: pass
 
 # ---------- /start ----------
@@ -178,6 +203,7 @@ async def cmd_start(message: Message):
     args = message.text.split()
     ref_id = None
 
+    # Вход по ссылке сделки
     if len(args) > 1 and args[1].startswith("deal_"):
         try:
             deal_id = int(args[1].split("_")[1])
@@ -190,10 +216,18 @@ async def cmd_start(message: Message):
                 else:
                     return await message.answer("❌ Вы уже участвуете или сделка заполнена.")
                 if d["seller_id"] is not None and d["buyer_id"] is not None:
-                    d["status"] = "active"
+                    d["status"] = "active"  # оба на месте
+                # Уведомление первой стороне с обновлённым статусом
                 other_id = d["seller_id"] if d["seller_id"] != uid else d["buyer_id"]
                 if other_id:
-                    try: await bot.send_message(other_id, f"ℹ️ Вторая сторона присоединилась к сделке #{deal_id}.")
+                    try:
+                        await bot.send_message(other_id,
+                            f"ℹ️ Вторая сторона присоединилась к сделке #{deal_id}.\n"
+                            f"Продавец: {username_or_id(d['seller_id'])}\n"
+                            f"Покупатель: {username_or_id(d['buyer_id'])}\n"
+                            f"Статус: {deal_status_text(d)}\n"
+                            f"Сумма: {d['amount']} {d['currency']}"
+                        )
                     except: pass
                 return await message.answer(
                     f"✅ Вы присоединились к сделке #{deal_id}!\n\n"
@@ -205,6 +239,7 @@ async def cmd_start(message: Message):
                 )
         except: pass
 
+    # Реферальная система
     if len(args) > 1:
         try: ref_id = int(args[1])
         except: pass
@@ -264,7 +299,7 @@ async def givemas_cmd(message: Message):
 async def main_menu_cb(call: CallbackQuery):
     await return_to_main(call, get_lang(call.from_user.id))
 
-# ---------- АДМИН КОЛБЭКИ ----------
+# ---------- АДМИН КОЛБЭКИ (исправлено) ----------
 @dp.callback_query(F.data == "admin_add_balance")
 async def adm_add_bal(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
@@ -296,9 +331,9 @@ async def adm_compl_proc(message: Message, state: FSMContext):
     try:
         did = int(message.text.strip())
         if did not in deals or deals[did]["status"]!="active":
-            return await message.answer("❌ Не найдена.", reply_markup=admin_menu())
+            return await message.answer("❌ Сделка не найдена или неактивна.", reply_markup=admin_menu())
         await complete_deal_logic(did, msg=message)
-    except: await message.answer("❌ Введи число.")
+    except: await message.answer("❌ Введите корректный ID сделки.")
     await state.clear()
 
 @dp.callback_query(F.data == "admin_all_deals")
