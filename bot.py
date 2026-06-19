@@ -204,7 +204,15 @@ async def complete_deal(message: Message):
 @dp.callback_query(F.data == "main_menu")
 async def show_main_menu(call: CallbackQuery):
     uid = call.from_user.id
-    await call.message.edit_text("💼 Главное меню\n\n💡 Выберите действие:", reply_markup=main_menu(get_lang(uid)))
+    await call.message.edit_text("💼 Добро пожаловать в  🤝
+
+⚡️ Ваш надёжный P2P-гарант:
+1⃣ Автоматические сделки с NFT и подарками
+2⃣ 🛡 Полная защита обеих сторон
+3⃣ 🪙 Реферальная программа — 50% от комиссии
+4⃣ 📦 Передача товаров через менеджера: @otc_help
+
+💡 Выберите действие ниже ⬇️", reply_markup=main_menu(get_lang(uid)))
 
 @dp.callback_query(F.data == "balance_menu")
 async def bal_menu(call: CallbackQuery):
