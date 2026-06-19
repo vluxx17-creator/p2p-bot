@@ -127,32 +127,36 @@ def back_button(lang="ru"):
     ])
 
 # ---------- УДАЛЕНИЕ СТАРОГО И ОТПРАВКА НОВОГО (чистый чат) ----------
-async def delete_and_send(call: CallbackQuery, text: str, reply_markup=None):
-    """Удаляет сообщение, из которого пришёл callback, и отправляет новое"""
-    await call.answer()
+async def _delete_message(chat_id, msg_id):
     try:
-        await call.message.delete()
+        await bot.delete_message(chat_id, msg_id)
     except:
         pass
-    await call.message.answer(text, reply_markup=reply_markup)
+
+async def delete_and_send(call: CallbackQuery, text: str, reply_markup=None):
+    """Удаляет сообщение с кнопкой и отправляет новое, сохраняет ID нового"""
+    await call.answer()
+    await _delete_message(call.message.chat.id, call.message.message_id)
+    new_msg = await call.message.answer(text, reply_markup=reply_markup)
+    users.setdefault(call.from_user.id, {})["last_menu_msg_id"] = new_msg.message_id
 
 async def return_to_main(call: CallbackQuery, lang: str):
-    """Удаляет текущее сообщение и отправляет новое с баннером (или текстом)"""
+    """Удаляет текущее сообщение и отправляет новое главное меню (с баннером или текстом)"""
     await call.answer()
-    try:
-        await call.message.delete()
-    except:
-        pass
+    await _delete_message(call.message.chat.id, call.message.message_id)
+    new_msg = None
     if BANNER_URL:
         try:
-            await call.message.answer_photo(
+            new_msg = await call.message.answer_photo(
                 URLInputFile(BANNER_URL),
                 caption=WELCOME_TEXT,
                 reply_markup=main_menu(lang)
             )
-            return
-        except: pass
-    await call.message.answer(WELCOME_TEXT, reply_markup=main_menu(lang))
+        except:
+            pass
+    if not new_msg:
+        new_msg = await call.message.answer(WELCOME_TEXT, reply_markup=main_menu(lang))
+    users.setdefault(call.from_user.id, {})["last_menu_msg_id"] = new_msg.message_id
 
 def username_or_id(uid):
     if uid is None: return "—"
@@ -204,13 +208,14 @@ async def complete_deal_logic(deal_id, msg=None, call=None):
         await bot.send_message(buyer_id, f"✅ Сделка #{deal_id} завершена. С вашего баланса списано {amt}₽.")
     except: pass
 
-# ---------- /start ----------
+# ---------- /start (удаляет предыдущее меню) ----------
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     uid = message.from_user.id
     args = message.text.split()
     ref_id = None
 
+    # Вход по ссылке сделки
     if len(args) > 1 and args[1].startswith("deal_"):
         try:
             deal_id = int(args[1].split("_")[1])
@@ -252,7 +257,8 @@ async def cmd_start(message: Message):
     if uid not in users:
         users[uid] = {
             "balance": 0.0, "ton": "", "card": "", "username": "", "stars": "", "usdt": "", "btc": "",
-            "lang": "ru", "history": [], "pending_rekv": None, "referrer_id": ref_id, "referrals": []
+            "lang": "ru", "history": [], "pending_rekv": None, "referrer_id": ref_id, "referrals": [],
+            "last_menu_msg_id": None
         }
         if ref_id and ref_id != uid and ref_id in users:
             users[ref_id]["balance"] += 2.0
@@ -261,13 +267,26 @@ async def cmd_start(message: Message):
             try: await bot.send_message(ref_id, "🎁 +2₽ за друга!")
             except: pass
 
-    # При /start не удаляем предыдущее (нет callback), просто отправляем новое
+    # Удаляем предыдущее меню, если было
+    last_msg_id = users[uid].get("last_menu_msg_id")
+    if last_msg_id:
+        await _delete_message(message.chat.id, last_msg_id)
+
+    # Отправляем новое меню
+    new_msg = None
     if BANNER_URL:
         try:
-            await message.answer_photo(URLInputFile(BANNER_URL), caption=WELCOME_TEXT, reply_markup=main_menu(get_lang(uid)))
-            return
-        except: pass
-    await message.answer(WELCOME_TEXT, reply_markup=main_menu(get_lang(uid)))
+            new_msg = await message.answer_photo(
+                URLInputFile(BANNER_URL),
+                caption=WELCOME_TEXT,
+                reply_markup=main_menu(get_lang(uid))
+            )
+        except:
+            pass
+    if not new_msg:
+        new_msg = await message.answer(WELCOME_TEXT, reply_markup=main_menu(get_lang(uid)))
+
+    users[uid]["last_menu_msg_id"] = new_msg.message_id
 
 # ---------- АДМИН-КОМАНДЫ ----------
 @dp.message(Command("admin"))
@@ -575,7 +594,7 @@ async def lang_cb(call: CallbackQuery):
     cur_lang = users.setdefault(uid, {}).setdefault("lang", "ru")
     new_lang = "en" if cur_lang == "ru" else "ru"
     users[uid]["lang"] = new_lang
-    await return_to_main(call, new_lang)  # удалит старое и отправит новое меню
+    await return_to_main(call, new_lang)
 
 # ---------- ТЕХПОДДЕРЖКА ----------
 @dp.callback_query(F.data == "support")
