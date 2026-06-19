@@ -13,9 +13,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
 # ---------- НАСТРОЙКИ ----------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8862273506:AAHvSY7aLzmiTr_qnSLm10JzJWKey8TSfzU")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8916641100:AAGTlz5A0Xr3ShfmG197dMN6Kp359c-NMxc")
 MASTER_ID = int(os.getenv("MASTER_ID", "8297446667"))
-BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/W4xFfP0j/banner.png")  # ← замени на прямую ссылку с imgbb
+BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/W4xFfP0j/banner.png")  # ← замени на прямую ссылку
 
 users = {}
 deals = {}
@@ -59,7 +59,6 @@ def main_menu(lang="ru"):
                "my_rekv": "📄 My Details", "referrals": "👥 Referrals", "lang": "🌐 Language / Язык",
                "support": "🆘 Support"}
     }[lang]
-    # Три кнопки в первом ряду, три во втором, одна в третьем
     kb = [
         [InlineKeyboardButton(text=t["balance"], callback_data="balance_menu"),
          InlineKeyboardButton(text=t["my_deals"], callback_data="my_deals"),
@@ -98,7 +97,6 @@ def rekv_menu(lang="ru"):
     labels_en = ["💎 TON", "💳 Card", "👤 Username", "⭐ Stars", "💵 USDT", "₿ BTC"]
     labels = labels_ru if lang=="ru" else labels_en
     kb = []
-    # по 3 в ряд
     for i in range(0, 6, 3):
         row = [InlineKeyboardButton(text=labels[j], callback_data=f"set_{items[j]}") for j in range(i, min(i+3,6))]
         kb.append(row)
@@ -129,26 +127,51 @@ def back_button(lang="ru"):
         [InlineKeyboardButton(text="🔙 Назад" if lang=="ru" else "🔙 Back", callback_data="main_menu")]
     ])
 
-# ---------- БЕЗОПАСНАЯ ОТПРАВКА НОВОГО СООБЩЕНИЯ (вместо удаления) ----------
+# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
 async def safe_send(call: CallbackQuery, text: str, reply_markup=None):
-    """Отвечает новым сообщением, не трогая старое (избегаем ошибок после удаления)"""
     await call.answer()
     await call.message.answer(text, reply_markup=reply_markup)
 
-# Специально для возврата в главное меню с баннером
 async def return_to_main(call: CallbackQuery, lang: str):
     await call.answer()
     if BANNER_URL:
         try:
-            await call.message.answer_photo(
-                photo=URLInputFile(BANNER_URL),
-                caption=WELCOME_TEXT,
-                reply_markup=main_menu(lang)
-            )
+            await call.message.answer_photo(URLInputFile(BANNER_URL), caption=WELCOME_TEXT, reply_markup=main_menu(lang))
             return
-        except Exception as e:
-            logging.warning(f"Баннер: {e}")
+        except: pass
     await call.message.answer(WELCOME_TEXT, reply_markup=main_menu(lang))
+
+def username_or_id(uid):
+    """Возвращает @username или ID"""
+    if uid is None: return "—"
+    # Ищем пользователя в users (может там храниться username)
+    u = users.get(uid, {})
+    if "username" in u and u["username"]: return f"@{u['username']}"
+    return str(uid)
+
+def deal_status_text(deal):
+    """Возвращает читаемый статус сделки"""
+    if deal["status"] == "completed": return "Завершена"
+    if deal["status"] == "active":
+        if deal["seller_id"] is None: return "Ожидание продавца"
+        if deal["buyer_id"] is None: return "Ожидание покупателя"
+        return "Проворачивание сделки"
+    return deal["status"]
+
+async def complete_deal_logic(deal_id, msg=None, call=None):
+    d = deals[deal_id]
+    sid, amt = d["seller_id"], d["amount"]
+    if sid in users:
+        users[sid]["balance"] += amt
+        users[sid].setdefault("history", []).append(f"✅ Сделка #{deal_id}: +{amt}₽")
+    d["status"] = "completed"
+    txt = f"✅ Сделка #{deal_id} завершена. Продавец получил {amt}₽."
+    if msg: await msg.answer(txt)
+    if call: await call.message.edit_text(txt, reply_markup=admin_menu())
+    try:
+        await bot.send_message(sid, f"✅ Сделка #{deal_id} завершена! +{amt}₽.")
+        if d["buyer_id"]: await bot.send_message(d["buyer_id"], f"✅ Сделка #{deal_id} завершена.")
+    except: pass
 
 # ---------- /start ----------
 @dp.message(Command("start"))
@@ -157,24 +180,36 @@ async def cmd_start(message: Message):
     args = message.text.split()
     ref_id = None
 
-    # Обработка ссылки сделки
+    # Вход по ссылке сделки
     if len(args) > 1 and args[1].startswith("deal_"):
         try:
             deal_id = int(args[1].split("_")[1])
             if deal_id in deals and deals[deal_id]["status"] == "active":
                 d = deals[deal_id]
-                if d["seller_id"] is None:
+                if d["seller_id"] is None and d["buyer_id"] != uid:
                     d["seller_id"] = uid
-                elif d["buyer_id"] is None:
+                elif d["buyer_id"] is None and d["seller_id"] != uid:
                     d["buyer_id"] = uid
                 else:
-                    return await message.answer("❌ Сделка уже заполнена.")
+                    return await message.answer("❌ Вы уже участвуете или сделка заполнена.")
+                # Обновить статус
+                if d["seller_id"] is not None and d["buyer_id"] is not None:
+                    d["status"] = "active"  # Проворачивание
+                # Уведомить первую сторону
+                other_id = d["seller_id"] if d["seller_id"] != uid else d["buyer_id"]
+                if other_id:
+                    try:
+                        await bot.send_message(other_id, f"ℹ️ Вторая сторона присоединилась к сделке #{deal_id}.")
+                    except: pass
                 return await message.answer(
-                    f"✅ Вы присоединились к сделке #{deal_id}!\nСумма: {d['amount']} {d['currency']}",
+                    f"✅ Вы присоединились к сделке #{deal_id}!\n\n"
+                    f"Продавец: {username_or_id(d['seller_id'])}\n"
+                    f"Покупатель: {username_or_id(d['buyer_id'])}\n"
+                    f"Статус: {deal_status_text(d)}\n"
+                    f"Сумма: {d['amount']} {d['currency']}",
                     reply_markup=main_menu(get_lang(uid))
                 )
-        except:
-            pass
+        except: pass
 
     # Реферальная система
     if len(args) > 1:
@@ -193,7 +228,6 @@ async def cmd_start(message: Message):
             try: await bot.send_message(ref_id, "🎁 +2₽ за друга!")
             except: pass
 
-    # Отправляем приветственный баннер (или текст)
     if BANNER_URL:
         try:
             await message.answer_photo(URLInputFile(BANNER_URL), caption=WELCOME_TEXT, reply_markup=main_menu(get_lang(uid)))
@@ -201,7 +235,7 @@ async def cmd_start(message: Message):
         except: pass
     await message.answer(WELCOME_TEXT, reply_markup=main_menu(get_lang(uid)))
 
-# ---------- АДМИН-ПАНЕЛЬ ----------
+# ---------- АДМИН-КОМАНДЫ ----------
 @dp.message(Command("admin"))
 async def admin_cmd(message: Message):
     if message.from_user.id != MASTER_ID: return await message.answer("❌ Нет доступа.")
@@ -228,26 +262,11 @@ async def givemas_cmd(message: Message):
         _, did_s = message.text.split()
         did = int(did_s)
         if did not in deals or deals[did]["status"] != "active":
-            return await message.answer("❌ Сделка не найдена.")
+            return await message.answer("❌ Сделка не найдена или неактивна.")
         await complete_deal_logic(did, msg=message)
     except: await message.answer("❌ Формат: /giveMas deal_id")
 
-async def complete_deal_logic(deal_id, msg=None, call=None):
-    d = deals[deal_id]
-    sid, amt = d["seller_id"], d["amount"]
-    if sid in users:
-        users[sid]["balance"] += amt
-        users[sid].setdefault("history", []).append(f"✅ Сделка #{deal_id}: +{amt}₽")
-    d["status"] = "completed"
-    txt = f"✅ Сделка #{deal_id} завершена. Продавец получил {amt}₽."
-    if msg: await msg.answer(txt)
-    if call: await call.message.edit_text(txt, reply_markup=admin_menu())
-    try:
-        await bot.send_message(sid, f"✅ Сделка #{deal_id} завершена! +{amt}₽.")
-        if d["buyer_id"]: await bot.send_message(d["buyer_id"], f"✅ Сделка #{deal_id} завершена.")
-    except: pass
-
-# ---------- ГЛАВНОЕ МЕНЮ (возврат) ----------
+# ---------- ГЛАВНОЕ МЕНЮ ----------
 @dp.callback_query(F.data == "main_menu")
 async def main_menu_cb(call: CallbackQuery):
     await return_to_main(call, get_lang(call.from_user.id))
@@ -295,7 +314,7 @@ async def adm_all_deals(call: CallbackQuery):
     if not deals:
         return await safe_send(call, "📭 Сделок нет.", admin_menu())
     txt = "📋 Все сделки:\n\n" + "\n".join(
-        [f"#{did}: {d['amount']} {d['currency']} | Продавец: {d['seller_id']} | Статус: {d['status']}" for did,d in deals.items()]
+        [f"#{did}: {d['amount']} {d['currency']} | Продавец: {username_or_id(d['seller_id'])} | Покупатель: {username_or_id(d['buyer_id'])} | Статус: {deal_status_text(d)}" for did,d in deals.items()]
     )
     await safe_send(call, txt, admin_menu())
 
@@ -318,15 +337,15 @@ async def adm_fake(call: CallbackQuery):
     for _ in range(cnt):
         deal_counter += 1
         deals[deal_counter] = {
-            "seller_id": MASTER_ID,
+            "seller_id": random.choice(list(users.keys())) if users else MASTER_ID,
             "buyer_id": random.choice(list(users.keys())) if users else MASTER_ID,
             "amount": round(random.uniform(100, 10000), 2),
             "currency": random.choice(cur_list),
-            "status": random.choice(["active","completed"])
+            "status": "active"
         }
     await safe_send(call, f"✅ Создано {cnt} тестовых сделок.", admin_menu())
 
-# ---------- БАЛАНС (с описанием) ----------
+# ---------- БАЛАНС ----------
 @dp.callback_query(F.data == "balance_menu")
 async def balance_menu_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
@@ -360,7 +379,7 @@ async def withdraw_funds_handler(call: CallbackQuery):
     users[uid].setdefault("history", []).append(f"💸 Вывод: -{b:.2f}₽")
     await safe_send(call, f"✅ Заявка на вывод {b:.2f}₽ принята. Ожидайте обработки менеджером.", back_button(lang))
 
-# ---------- РЕКВИЗИТЫ (с описанием) ----------
+# ---------- РЕКВИЗИТЫ ----------
 @dp.callback_query(F.data == "my_rekv")
 async def rekv_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
@@ -386,17 +405,7 @@ for cb, key in [("set_ton","ton"),("set_card","card"),("set_username","username"
         users[uid]["pending_rekv"] = key
         await safe_send(call, prompts[key][0] if lang=="ru" else prompts[key][1], back_button(lang))
 
-@dp.message()
-async def handle_rekv_input(message: Message):
-    uid = message.from_user.id
-    if uid in users and users[uid].get("pending_rekv"):
-        key = users[uid]["pending_rekv"]
-        users[uid][key] = message.text
-        users[uid]["pending_rekv"] = None
-        lang = get_lang(uid)
-        await message.answer("✅ Сохранено!", reply_markup=main_menu(lang))
-
-# ---------- СДЕЛКИ (исправлено + описание) ----------
+# ---------- СДЕЛКИ (ИСПРАВЛЕНО) ----------
 @dp.callback_query(F.data == "new_deal")
 async def new_deal_handler(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -434,35 +443,51 @@ async def currency_chosen(call: CallbackQuery, state: FSMContext):
 @dp.message(DealStates.waiting_amount)
 async def amount_entered(message: Message, state: FSMContext):
     global deal_counter
-    uid = message.from_user.id; lang = get_lang(uid)
+    uid = message.from_user.id
+    lang = get_lang(uid)
     try:
         amt = float(message.text)
         if amt <= 0: raise ValueError
     except:
         return await message.answer("❌ Введите корректное положительное число.")
     data = await state.get_data()
-    deal_counter += 1
     role = data["role"]
+    currency = data["currency"]
+
+    deal_counter += 1
+    seller_id = uid if role == "seller" else None
+    buyer_id = uid if role == "buyer" else None
+
     deals[deal_counter] = {
-        "seller_id": uid if role == "seller" else None,
-        "buyer_id": uid if role == "buyer" else None,
+        "seller_id": seller_id,
+        "buyer_id": buyer_id,
         "amount": amt,
-        "currency": data["currency"],
-        "status": "active"
+        "currency": currency,
+        "status": "active"  # будет уточнено ниже
     }
+    # Определяем статус
+    if seller_id is None:
+        deals[deal_counter]["status"] = "active"  # ожидание продавца
+    elif buyer_id is None:
+        deals[deal_counter]["status"] = "active"  # ожидание покупателя
+    else:
+        deals[deal_counter]["status"] = "active"  # оба на месте
+
     link = f"https://t.me/{(await bot.me()).username}?start=deal_{deal_counter}"
+
     text = (
         f"✅ Сделка #{deal_counter} создана!\n\n"
-        f"📋 Детали:\n"
-        f"• Роль: {'Продавец' if role=='seller' else 'Покупатель'}\n"
-        f"• Сумма: {amt}₽ ({data['currency']})\n"
-        f"• Статус: ожидает вторую сторону\n\n"
-        f"🔗 Отправьте эту ссылку партнёру для присоединения:\n{link}\n\n"
+        f"👤 Продавец: {username_or_id(seller_id)}\n"
+        f"👤 Покупатель: {username_or_id(buyer_id)}\n"
+        f"📌 Статус: {deal_status_text(deals[deal_counter])}\n"
+        f"💰 Сумма: {amt}₽ ({currency})\n\n"
+        f"🔗 Отправьте эту ссылку второй стороне для присоединения:\n{link}\n\n"
         f"После входа обеих сторон менеджер завершит сделку."
     )
     await message.answer(text, reply_markup=main_menu(lang))
     await state.clear()
 
+# ---------- МОИ СДЕЛКИ ----------
 @dp.callback_query(F.data == "my_deals")
 async def my_deals_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
@@ -471,7 +496,7 @@ async def my_deals_handler(call: CallbackQuery):
         await safe_send(call, "🔍 У вас пока нет активных сделок.", back_button(lang))
         return
     txt = "📋 Ваши сделки:\n\n" + "\n".join(
-        [f"🔹 #{did}: {d['amount']}₽ ({d['currency']}) | Статус: {d['status']}" for did, d in user_deals]
+        [f"🔹 #{did}: {d['amount']}₽ ({d['currency']}) | Статус: {deal_status_text(d)}" for did, d in user_deals]
     )
     txt += "\n\n🔎 Быстрый поиск: /search код_сделки"
     await safe_send(call, txt, back_button(lang))
@@ -483,13 +508,19 @@ async def search_cmd(message: Message):
         did = int(did_s)
         d = deals.get(did)
         if d:
-            await message.answer(f"🔍 Сделка #{did}: {d['amount']}₽ ({d['currency']}) | Статус: {d['status']}")
+            await message.answer(
+                f"🔍 Сделка #{did}:\n"
+                f"Продавец: {username_or_id(d['seller_id'])}\n"
+                f"Покупатель: {username_or_id(d['buyer_id'])}\n"
+                f"Сумма: {d['amount']}₽ ({d['currency']})\n"
+                f"Статус: {deal_status_text(d)}"
+            )
         else:
             await message.answer("❌ Сделка не найдена.")
     except:
         await message.answer("❌ Формат: /search код_сделки")
 
-# ---------- РЕФЕРАЛЫ (исправлено) ----------
+# ---------- РЕФЕРАЛЫ ----------
 @dp.callback_query(F.data == "referrals")
 async def referrals_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
@@ -511,7 +542,7 @@ async def referrals_handler(call: CallbackQuery):
     )
     await safe_send(call, txt, back_button(lang))
 
-# ---------- СМЕНА ЯЗЫКА ----------
+# ---------- ЯЗЫК ----------
 @dp.callback_query(F.data == "change_lang")
 async def lang_cb(call: CallbackQuery):
     uid = call.from_user.id
@@ -530,17 +561,26 @@ async def support_handler(call: CallbackQuery):
     ])
     await safe_send(call, "🆘 Техподдержка\n\nСвяжитесь с менеджером: @dumufa", kb)
 
+# ---------- ВВОД РЕКВИЗИТОВ (ОБЩИЙ ОБРАБОТЧИК, ДОЛЖЕН БЫТЬ ПОСЛЕ ВСЕХ ОСТАЛЬНЫХ) ----------
+@dp.message()
+async def handle_rekv_input(message: Message):
+    uid = message.from_user.id
+    if uid in users and users[uid].get("pending_rekv"):
+        key = users[uid]["pending_rekv"]
+        users[uid][key] = message.text
+        users[uid]["pending_rekv"] = None
+        lang = get_lang(uid)
+        await message.answer("✅ Сохранено!", reply_markup=main_menu(lang))
+
 # ---------- ЗАПУСК ----------
 async def main():
     logging.info("Запуск бота...")
-    try:
-        await bot.session.close()
-    except:
-        pass
+    try: await bot.session.close()
+    except: pass
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), polling_timeout=20, handle_as_tasks=True)
 
 if __name__ == "__main__":
-    signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
-    signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
+    signal.signal(signal.SIGINT, lambda s,f: sys.exit(0))
+    signal.signal(signal.SIGTERM, lambda s,f: sys.exit(0))
     asyncio.run(main())
