@@ -1,0 +1,11 @@
+services:
+  - type: worker
+    name: p2p-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        value: 8862273506:AAEmA-xWmihELm0oajcvkaxkI_Rbr2kRppw
+      - key: MASTER_ID
+        value: 8297446667
