@@ -15,7 +15,7 @@ from aiogram.client.default import DefaultBotProperties
 # ---------- НАСТРОЙКИ ----------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8916641100:AAGTlz5A0Xr3ShfmG197dMN6Kp359c-NMxc")
 MASTER_ID = int(os.getenv("MASTER_ID", "8297446667"))
-BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/W4xFfP0j/banner.png")  # ← замени на прямую ссылку с imgbb при желании
+BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/W4xFfP0j/banner.png")  # ← замени на прямую ссылку
 
 users = {}
 deals = {}
@@ -126,16 +126,30 @@ def back_button(lang="ru"):
         [InlineKeyboardButton(text="🔙 Назад" if lang=="ru" else "🔙 Back", callback_data="main_menu")]
     ])
 
-# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
-async def safe_send(call: CallbackQuery, text: str, reply_markup=None):
+# ---------- УДАЛЕНИЕ СТАРОГО И ОТПРАВКА НОВОГО (чистый чат) ----------
+async def delete_and_send(call: CallbackQuery, text: str, reply_markup=None):
+    """Удаляет сообщение, из которого пришёл callback, и отправляет новое"""
     await call.answer()
+    try:
+        await call.message.delete()
+    except:
+        pass
     await call.message.answer(text, reply_markup=reply_markup)
 
 async def return_to_main(call: CallbackQuery, lang: str):
+    """Удаляет текущее сообщение и отправляет новое с баннером (или текстом)"""
     await call.answer()
+    try:
+        await call.message.delete()
+    except:
+        pass
     if BANNER_URL:
         try:
-            await call.message.answer_photo(URLInputFile(BANNER_URL), caption=WELCOME_TEXT, reply_markup=main_menu(lang))
+            await call.message.answer_photo(
+                URLInputFile(BANNER_URL),
+                caption=WELCOME_TEXT,
+                reply_markup=main_menu(lang)
+            )
             return
         except: pass
     await call.message.answer(WELCOME_TEXT, reply_markup=main_menu(lang))
@@ -166,7 +180,6 @@ async def complete_deal_logic(deal_id, msg=None, call=None):
         if call: await call.message.edit_text(txt)
         return
 
-    # Проверка баланса покупателя
     buyer_balance = users.get(buyer_id, {}).get("balance", 0)
     if buyer_balance < amt:
         txt = f"❌ У покупателя (ID {buyer_id}) недостаточно средств. Баланс: {buyer_balance}₽, требуется: {amt}₽."
@@ -174,25 +187,20 @@ async def complete_deal_logic(deal_id, msg=None, call=None):
         if call: await call.message.edit_text(txt)
         return
 
-    # Списание с покупателя
     users[buyer_id]["balance"] -= amt
     users[buyer_id].setdefault("history", []).append(f"💸 Сделка #{deal_id}: -{amt}₽")
 
-    # Зачисление продавцу
-    if seller_id in users:
-        users[seller_id]["balance"] += amt
-        users[seller_id].setdefault("history", []).append(f"✅ Сделка #{deal_id}: +{amt}₽")
-    else:
-        users[seller_id] = {"balance": amt, "history": [f"✅ Сделка #{deal_id}: +{amt}₽"]}
+    if seller_id not in users:
+        users[seller_id] = {"balance": 0, "history": []}
+    users[seller_id]["balance"] += amt
+    users[seller_id].setdefault("history", []).append(f"✅ Сделка #{deal_id}: +{amt}₽")
 
     d["status"] = "completed"
     txt = f"✅ Сделка #{deal_id} завершена. Продавец получил {amt}₽."
     if msg: await msg.answer(txt)
     if call: await call.message.edit_text(txt, reply_markup=admin_menu())
-
-    # Уведомления участникам
     try:
-        await bot.send_message(seller_id, f"✅ Сделка #{deal_id} завершена! Вам зачислено {amt}₽.")
+        await bot.send_message(seller_id, f"✅ Сделка #{deal_id} завершена! +{amt}₽.")
         await bot.send_message(buyer_id, f"✅ Сделка #{deal_id} завершена. С вашего баланса списано {amt}₽.")
     except: pass
 
@@ -203,7 +211,6 @@ async def cmd_start(message: Message):
     args = message.text.split()
     ref_id = None
 
-    # Вход по ссылке сделки
     if len(args) > 1 and args[1].startswith("deal_"):
         try:
             deal_id = int(args[1].split("_")[1])
@@ -216,8 +223,7 @@ async def cmd_start(message: Message):
                 else:
                     return await message.answer("❌ Вы уже участвуете или сделка заполнена.")
                 if d["seller_id"] is not None and d["buyer_id"] is not None:
-                    d["status"] = "active"  # оба на месте
-                # Уведомление первой стороне с обновлённым статусом
+                    d["status"] = "active"
                 other_id = d["seller_id"] if d["seller_id"] != uid else d["buyer_id"]
                 if other_id:
                     try:
@@ -239,7 +245,6 @@ async def cmd_start(message: Message):
                 )
         except: pass
 
-    # Реферальная система
     if len(args) > 1:
         try: ref_id = int(args[1])
         except: pass
@@ -256,6 +261,7 @@ async def cmd_start(message: Message):
             try: await bot.send_message(ref_id, "🎁 +2₽ за друга!")
             except: pass
 
+    # При /start не удаляем предыдущее (нет callback), просто отправляем новое
     if BANNER_URL:
         try:
             await message.answer_photo(URLInputFile(BANNER_URL), caption=WELCOME_TEXT, reply_markup=main_menu(get_lang(uid)))
@@ -299,11 +305,11 @@ async def givemas_cmd(message: Message):
 async def main_menu_cb(call: CallbackQuery):
     await return_to_main(call, get_lang(call.from_user.id))
 
-# ---------- АДМИН КОЛБЭКИ (исправлено) ----------
+# ---------- АДМИН КОЛБЭКИ ----------
 @dp.callback_query(F.data == "admin_add_balance")
 async def adm_add_bal(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
-    await safe_send(call, "Введите ID пользователя и сумму через пробел:\nПример: 123456789 500", back_button("ru"))
+    await delete_and_send(call, "Введите ID пользователя и сумму через пробел:\nПример: 123456789 500", back_button("ru"))
     await state.set_state(AdminStates.waiting_user_id)
 
 @dp.message(AdminStates.waiting_user_id)
@@ -322,7 +328,7 @@ async def adm_bal_proc(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_complete_deal")
 async def adm_compl(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
-    await safe_send(call, "Введите ID сделки для завершения:", back_button("ru"))
+    await delete_and_send(call, "Введите ID сделки для завершения:", back_button("ru"))
     await state.set_state(AdminStates.waiting_deal_id)
 
 @dp.message(AdminStates.waiting_deal_id)
@@ -339,11 +345,11 @@ async def adm_compl_proc(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_all_deals")
 async def adm_all_deals(call: CallbackQuery):
     if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
-    if not deals: return await safe_send(call, "📭 Сделок нет.", admin_menu())
+    if not deals: return await delete_and_send(call, "📭 Сделок нет.", admin_menu())
     txt = "📋 Все сделки:\n\n" + "\n".join(
         [f"#{did}: {d['amount']} {d['currency']} | Продавец: {username_or_id(d['seller_id'])} | Покупатель: {username_or_id(d['buyer_id'])} | Статус: {deal_status_text(d)}" for did,d in deals.items()]
     )
-    await safe_send(call, txt, admin_menu())
+    await delete_and_send(call, txt, admin_menu())
 
 @dp.callback_query(F.data == "admin_stats")
 async def adm_stats(call: CallbackQuery):
@@ -353,7 +359,7 @@ async def adm_stats(call: CallbackQuery):
     active_deals = sum(1 for d in deals.values() if d["status"] == "active")
     total_balance = sum(u.get("balance", 0) for u in users.values())
     txt = f"📊 Статистика:\n\n👥 Пользователей: {total_users}\n📋 Сделок: {total_deals}\n🟢 Активных: {active_deals}\n💰 Общий баланс: {total_balance}₽"
-    await safe_send(call, txt, admin_menu())
+    await delete_and_send(call, txt, admin_menu())
 
 @dp.callback_query(F.data == "admin_fake_deals")
 async def adm_fake(call: CallbackQuery):
@@ -370,7 +376,7 @@ async def adm_fake(call: CallbackQuery):
             "currency": random.choice(cur_list),
             "status": "active"
         }
-    await safe_send(call, f"✅ Создано {cnt} тестовых сделок.", admin_menu())
+    await delete_and_send(call, f"✅ Создано {cnt} тестовых сделок.", admin_menu())
 
 # ---------- БАЛАНС ----------
 @dp.callback_query(F.data == "balance_menu")
@@ -386,14 +392,14 @@ async def balance_menu_handler(call: CallbackQuery):
         "🔹 View your earnings from deals and referrals.\n"
         "Withdraw to your payment details."
     )
-    await safe_send(call, txt, balance_menu(lang))
+    await delete_and_send(call, txt, balance_menu(lang))
 
 @dp.callback_query(F.data == "tx_history")
 async def tx_history_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
     h = users.get(uid, {}).get("history", [])
     txt = "📜 История транзакций:\n" + ("\n".join(h[-15:]) if h else "Пусто")
-    await safe_send(call, txt, back_button(lang))
+    await delete_and_send(call, txt, back_button(lang))
 
 @dp.callback_query(F.data == "withdraw_funds")
 async def withdraw_funds_handler(call: CallbackQuery):
@@ -404,7 +410,7 @@ async def withdraw_funds_handler(call: CallbackQuery):
         return
     users[uid]["balance"] = 0.0
     users[uid].setdefault("history", []).append(f"💸 Вывод: -{b:.2f}₽")
-    await safe_send(call, f"✅ Заявка на вывод {b:.2f}₽ принята. Ожидайте обработки менеджером.", back_button(lang))
+    await delete_and_send(call, f"✅ Заявка на вывод {b:.2f}₽ принята. Ожидайте обработки менеджером.", back_button(lang))
 
 # ---------- РЕКВИЗИТЫ ----------
 @dp.callback_query(F.data == "my_rekv")
@@ -414,7 +420,7 @@ async def rekv_handler(call: CallbackQuery):
     lbl = {"ton":"💎 TON","card":"💳 Карта","username":"👤 Юзернейм","stars":"⭐ Звезды","usdt":"💵 USDT","btc":"₿ BTC"}
     entries = [f"{v}: {u.get(k, '❌ не указан')}" for k,v in lbl.items()]
     txt = "📄 Ваши реквизиты для получения средств:\n\n" + "\n".join(entries)
-    await safe_send(call, txt, rekv_menu(lang))
+    await delete_and_send(call, txt, rekv_menu(lang))
 
 for cb, key in [("set_ton","ton"),("set_card","card"),("set_username","username"),
                 ("set_stars","stars"),("set_usdt","usdt"),("set_btc","btc")]:
@@ -430,7 +436,7 @@ for cb, key in [("set_ton","ton"),("set_card","card"),("set_username","username"
             "btc": ("Введите BTC кошелёк:", "Enter BTC wallet:")
         }
         users[uid]["pending_rekv"] = key
-        await safe_send(call, prompts[key][0] if lang=="ru" else prompts[key][1], back_button(lang))
+        await delete_and_send(call, prompts[key][0] if lang=="ru" else prompts[key][1], back_button(lang))
 
 # ---------- СДЕЛКИ ----------
 @dp.callback_query(F.data == "new_deal")
@@ -448,7 +454,7 @@ async def new_deal_handler(call: CallbackQuery, state: FSMContext):
         "• Seller — you'll receive payment after manager confirmation.\n"
         "• Buyer — you'll receive the item after payment."
     )
-    await safe_send(call, txt, deal_role_choice(lang))
+    await delete_and_send(call, txt, deal_role_choice(lang))
     await state.set_state(DealStates.waiting_role)
 
 @dp.callback_query(F.data.startswith("role_"), DealStates.waiting_role)
@@ -456,7 +462,7 @@ async def role_chosen(call: CallbackQuery, state: FSMContext):
     role = "seller" if call.data == "role_seller" else "buyer"
     await state.update_data(role=role)
     lang = get_lang(call.from_user.id)
-    await safe_send(call, "Выберите валюту, которой продавец получит деньги:", currency_choice(lang))
+    await delete_and_send(call, "Выберите валюту, которой продавец получит деньги:", currency_choice(lang))
     await state.set_state(DealStates.waiting_currency)
 
 @dp.callback_query(F.data.startswith("cur_"), DealStates.waiting_currency)
@@ -464,7 +470,7 @@ async def currency_chosen(call: CallbackQuery, state: FSMContext):
     cur = call.data.replace("cur_", "")
     await state.update_data(currency=cur)
     lang = get_lang(call.from_user.id)
-    await safe_send(call, "💰 Введите сумму сделки (в рублях):", back_button(lang))
+    await delete_and_send(call, "💰 Введите сумму сделки (в рублях):", back_button(lang))
     await state.set_state(DealStates.waiting_amount)
 
 @dp.message(DealStates.waiting_amount)
@@ -513,13 +519,13 @@ async def my_deals_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
     user_deals = [(did, d) for did, d in deals.items() if d["seller_id"] == uid or d["buyer_id"] == uid]
     if not user_deals:
-        await safe_send(call, "🔍 У вас пока нет активных сделок.", back_button(lang))
+        await delete_and_send(call, "🔍 У вас пока нет активных сделок.", back_button(lang))
         return
     txt = "📋 Ваши сделки:\n\n" + "\n".join(
         [f"🔹 #{did}: {d['amount']}₽ ({d['currency']}) | Статус: {deal_status_text(d)}" for did, d in user_deals]
     )
     txt += "\n\n🔎 Быстрый поиск: /search код_сделки"
-    await safe_send(call, txt, back_button(lang))
+    await delete_and_send(call, txt, back_button(lang))
 
 @dp.message(Command("search"))
 async def search_cmd(message: Message):
@@ -560,7 +566,7 @@ async def referrals_handler(call: CallbackQuery):
         f"👤 Invited: {len(refs)}\n"
         f"💰 Earned: {len(refs)*2}₽"
     )
-    await safe_send(call, txt, back_button(lang))
+    await delete_and_send(call, txt, back_button(lang))
 
 # ---------- ЯЗЫК ----------
 @dp.callback_query(F.data == "change_lang")
@@ -569,7 +575,7 @@ async def lang_cb(call: CallbackQuery):
     cur_lang = users.setdefault(uid, {}).setdefault("lang", "ru")
     new_lang = "en" if cur_lang == "ru" else "ru"
     users[uid]["lang"] = new_lang
-    await return_to_main(call, new_lang)
+    await return_to_main(call, new_lang)  # удалит старое и отправит новое меню
 
 # ---------- ТЕХПОДДЕРЖКА ----------
 @dp.callback_query(F.data == "support")
@@ -579,7 +585,7 @@ async def support_handler(call: CallbackQuery):
         [InlineKeyboardButton(text="💬 Написать @dumufa", url="https://t.me/dumufa")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
     ])
-    await safe_send(call, "🆘 Техподдержка\n\nСвяжитесь с менеджером: @dumufa", kb)
+    await delete_and_send(call, "🆘 Техподдержка\n\nСвяжитесь с менеджером: @dumufa", kb)
 
 # ---------- ВВОД РЕКВИЗИТОВ (самый последний обработчик) ----------
 @dp.message()
