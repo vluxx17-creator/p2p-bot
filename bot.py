@@ -49,45 +49,44 @@ class AdminStates(StatesGroup):
 
 def get_lang(uid): return users.get(uid, {}).get("lang", "ru")
 
-# ---------- КЛАВИАТУРЫ (по 3 в ряд) ----------
+# ---------- ГЛАВНОЕ МЕНЮ (2 кнопки в ряд, последняя одна широкая) ----------
 def main_menu(lang="ru"):
     t = {
-        "ru": {"balance": "💰 Баланс", "my_deals": "📋 Мои сделки", "new_deal": "🤝 Создать сделку",
-               "my_rekv": "📄 Реквизиты", "referrals": "👥 Рефералы", "lang": "🌐 Язык / Language",
-               "support": "🆘 Техподдержка"},
-        "en": {"balance": "💰 Balance", "my_deals": "📋 My Deals", "new_deal": "🤝 New Deal",
-               "my_rekv": "📄 My Details", "referrals": "👥 Referrals", "lang": "🌐 Language / Язык",
-               "support": "🆘 Support"}
+        "ru": ["💰 Баланс", "📋 Мои сделки", "🤝 Создать сделку",
+               "📄 Реквизиты", "👥 Рефералы", "🌐 Язык / Language", "🆘 Техподдержка"],
+        "en": ["💰 Balance", "📋 My Deals", "🤝 New Deal",
+               "📄 My Details", "👥 Referrals", "🌐 Language / Язык", "🆘 Support"]
     }[lang]
+    callbacks = ["balance_menu", "my_deals", "new_deal", "my_rekv", "referrals", "change_lang", "support"]
     kb = [
-        [InlineKeyboardButton(text=t["balance"], callback_data="balance_menu"),
-         InlineKeyboardButton(text=t["my_deals"], callback_data="my_deals"),
-         InlineKeyboardButton(text=t["new_deal"], callback_data="new_deal")],
-        [InlineKeyboardButton(text=t["my_rekv"], callback_data="my_rekv"),
-         InlineKeyboardButton(text=t["referrals"], callback_data="referrals"),
-         InlineKeyboardButton(text=t["lang"], callback_data="change_lang")],
-        [InlineKeyboardButton(text=t["support"], callback_data="support")]
+        [InlineKeyboardButton(text=t[0], callback_data=callbacks[0]),
+         InlineKeyboardButton(text=t[1], callback_data=callbacks[1])],
+        [InlineKeyboardButton(text=t[2], callback_data=callbacks[2]),
+         InlineKeyboardButton(text=t[3], callback_data=callbacks[3])],
+        [InlineKeyboardButton(text=t[4], callback_data=callbacks[4]),
+         InlineKeyboardButton(text=t[5], callback_data=callbacks[5])],
+        [InlineKeyboardButton(text=t[6], callback_data=callbacks[6])]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def admin_menu():
     kb = [
         [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="admin_add_balance")],
-        [InlineKeyboardButton(text="✅ Завершить сделку", callback_data="admin_complete_deal"),
-         InlineKeyboardButton(text="📋 Все сделки", callback_data="admin_all_deals")],
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"),
-         InlineKeyboardButton(text="🔢 Тестовые сделки", callback_data="admin_fake_deals")],
+        [InlineKeyboardButton(text="✅ Завершить сделку", callback_data="admin_complete_deal")],
+        [InlineKeyboardButton(text="📋 Все сделки", callback_data="admin_all_deals")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="🔢 Тестовые сделки", callback_data="admin_fake_deals")],
         [InlineKeyboardButton(text="🔙 В главное меню", callback_data="main_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def balance_menu(lang="ru"):
-    t = {"ru": {"history": "📜 История транзакций", "withdraw": "💸 Вывод средств", "back": "🔙 Назад"},
-         "en": {"history": "📜 Transaction History", "withdraw": "💸 Withdraw", "back": "🔙 Back"}}[lang]
+    t = {"ru": ["📜 История транзакций", "💸 Вывод средств", "🔙 Назад"],
+         "en": ["📜 Transaction History", "💸 Withdraw", "🔙 Back"]}[lang]
     kb = [
-        [InlineKeyboardButton(text=t["history"], callback_data="tx_history"),
-         InlineKeyboardButton(text=t["withdraw"], callback_data="withdraw_funds")],
-        [InlineKeyboardButton(text=t["back"], callback_data="main_menu")]
+        [InlineKeyboardButton(text=t[0], callback_data="tx_history"),
+         InlineKeyboardButton(text=t[1], callback_data="withdraw_funds")],
+        [InlineKeyboardButton(text=t[2], callback_data="main_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -97,6 +96,7 @@ def rekv_menu(lang="ru"):
     labels_en = ["💎 TON", "💳 Card", "👤 Username", "⭐ Stars", "💵 USDT", "₿ BTC"]
     labels = labels_ru if lang=="ru" else labels_en
     kb = []
+    # по 3 в ряд для реквизитов (6 кнопок)
     for i in range(0, 6, 3):
         row = [InlineKeyboardButton(text=labels[j], callback_data=f"set_{items[j]}") for j in range(i, min(i+3,6))]
         kb.append(row)
@@ -116,6 +116,7 @@ def currency_choice(lang="ru"):
     cur = [("💎 TON", "ton"), ("💳 Карта", "card"), ("👤 Юзернейм", "username"),
            ("⭐ Звезды", "stars"), ("💵 USDT", "usdt"), ("₿ BTC", "btc")]
     kb = []
+    # по 3 в ряд для валют
     for i in range(0, 6, 3):
         row = [InlineKeyboardButton(text=c[0], callback_data=f"cur_{c[1]}") for c in cur[i:i+3]]
         kb.append(row)
@@ -142,15 +143,12 @@ async def return_to_main(call: CallbackQuery, lang: str):
     await call.message.answer(WELCOME_TEXT, reply_markup=main_menu(lang))
 
 def username_or_id(uid):
-    """Возвращает @username или ID"""
     if uid is None: return "—"
-    # Ищем пользователя в users (может там храниться username)
     u = users.get(uid, {})
     if "username" in u and u["username"]: return f"@{u['username']}"
     return str(uid)
 
 def deal_status_text(deal):
-    """Возвращает читаемый статус сделки"""
     if deal["status"] == "completed": return "Завершена"
     if deal["status"] == "active":
         if deal["seller_id"] is None: return "Ожидание продавца"
@@ -180,7 +178,6 @@ async def cmd_start(message: Message):
     args = message.text.split()
     ref_id = None
 
-    # Вход по ссылке сделки
     if len(args) > 1 and args[1].startswith("deal_"):
         try:
             deal_id = int(args[1].split("_")[1])
@@ -192,14 +189,11 @@ async def cmd_start(message: Message):
                     d["buyer_id"] = uid
                 else:
                     return await message.answer("❌ Вы уже участвуете или сделка заполнена.")
-                # Обновить статус
                 if d["seller_id"] is not None and d["buyer_id"] is not None:
-                    d["status"] = "active"  # Проворачивание
-                # Уведомить первую сторону
+                    d["status"] = "active"
                 other_id = d["seller_id"] if d["seller_id"] != uid else d["buyer_id"]
                 if other_id:
-                    try:
-                        await bot.send_message(other_id, f"ℹ️ Вторая сторона присоединилась к сделке #{deal_id}.")
+                    try: await bot.send_message(other_id, f"ℹ️ Вторая сторона присоединилась к сделке #{deal_id}.")
                     except: pass
                 return await message.answer(
                     f"✅ Вы присоединились к сделке #{deal_id}!\n\n"
@@ -211,7 +205,6 @@ async def cmd_start(message: Message):
                 )
         except: pass
 
-    # Реферальная система
     if len(args) > 1:
         try: ref_id = int(args[1])
         except: pass
@@ -311,8 +304,7 @@ async def adm_compl_proc(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_all_deals")
 async def adm_all_deals(call: CallbackQuery):
     if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
-    if not deals:
-        return await safe_send(call, "📭 Сделок нет.", admin_menu())
+    if not deals: return await safe_send(call, "📭 Сделок нет.", admin_menu())
     txt = "📋 Все сделки:\n\n" + "\n".join(
         [f"#{did}: {d['amount']} {d['currency']} | Продавец: {username_or_id(d['seller_id'])} | Покупатель: {username_or_id(d['buyer_id'])} | Статус: {deal_status_text(d)}" for did,d in deals.items()]
     )
@@ -405,7 +397,7 @@ for cb, key in [("set_ton","ton"),("set_card","card"),("set_username","username"
         users[uid]["pending_rekv"] = key
         await safe_send(call, prompts[key][0] if lang=="ru" else prompts[key][1], back_button(lang))
 
-# ---------- СДЕЛКИ (ИСПРАВЛЕНО) ----------
+# ---------- СДЕЛКИ ----------
 @dp.callback_query(F.data == "new_deal")
 async def new_deal_handler(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -463,15 +455,8 @@ async def amount_entered(message: Message, state: FSMContext):
         "buyer_id": buyer_id,
         "amount": amt,
         "currency": currency,
-        "status": "active"  # будет уточнено ниже
+        "status": "active"
     }
-    # Определяем статус
-    if seller_id is None:
-        deals[deal_counter]["status"] = "active"  # ожидание продавца
-    elif buyer_id is None:
-        deals[deal_counter]["status"] = "active"  # ожидание покупателя
-    else:
-        deals[deal_counter]["status"] = "active"  # оба на месте
 
     link = f"https://t.me/{(await bot.me()).username}?start=deal_{deal_counter}"
 
@@ -561,7 +546,7 @@ async def support_handler(call: CallbackQuery):
     ])
     await safe_send(call, "🆘 Техподдержка\n\nСвяжитесь с менеджером: @dumufa", kb)
 
-# ---------- ВВОД РЕКВИЗИТОВ (ОБЩИЙ ОБРАБОТЧИК, ДОЛЖЕН БЫТЬ ПОСЛЕ ВСЕХ ОСТАЛЬНЫХ) ----------
+# ---------- ВВОД РЕКВИЗИТОВ (самый последний обработчик) ----------
 @dp.message()
 async def handle_rekv_input(message: Message):
     uid = message.from_user.id
