@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+import sys
+import signal
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
@@ -10,7 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
 # ---------- НАСТРОЙКИ ----------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8862273506:AAEmA-xWmihELm0oajcvkaxkI_Rbr2kRppw")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8862273506:AAHvSY7aLzmiTr_qnSLm10JzJWKey8TSfzU")
 MASTER_ID = int(os.getenv("MASTER_ID", "8297446667"))
 
 # Временное хранилище
@@ -31,9 +33,6 @@ class DealStates(StatesGroup):
     choosing_role = State()
     choosing_currency = State()
     entering_amount = State()
-
-class RekvStates(StatesGroup):
-    waiting_input = State()
 
 # ---------- КЛАВИАТУРЫ ----------
 def main_menu(lang="ru"):
@@ -132,7 +131,6 @@ def back_button(lang="ru"):
         [InlineKeyboardButton(text="🔙 Назад" if lang=="ru" else "🔙 Back", callback_data="main_menu")]
     ])
 
-# ---------- ПОЛУЧЕНИЕ ЯЗЫКА ----------
 def get_lang(uid):
     return users.get(uid, {}).get("lang", "ru")
 
@@ -203,13 +201,11 @@ async def complete_deal(message: Message):
     except:
         await message.answer("❌ Формат: /giveMas deal_id")
 
-# ---------- ГЛАВНОЕ МЕНЮ ----------
 @dp.callback_query(F.data == "main_menu")
 async def show_main_menu(call: CallbackQuery):
     uid = call.from_user.id
     await call.message.edit_text("💼 Главное меню\n\n💡 Выберите действие:", reply_markup=main_menu(get_lang(uid)))
 
-# ---------- БАЛАНС ----------
 @dp.callback_query(F.data == "balance_menu")
 async def bal_menu(call: CallbackQuery):
     uid = call.from_user.id
@@ -238,7 +234,6 @@ async def withdraw_funds(call: CallbackQuery):
     if bal <= 0:
         await call.answer("❌ Недостаточно средств" if lang=="ru" else "❌ Insufficient funds", show_alert=True)
         return
-    # Визуальный вывод (списываем с баланса)
     users[uid]["balance"] = 0.0
     users[uid].setdefault("history", []).append(f"💸 Вывод: -{bal:.2f}")
     await call.message.edit_text(
@@ -246,7 +241,6 @@ async def withdraw_funds(call: CallbackQuery):
         reply_markup=back_button(lang)
     )
 
-# ---------- МОИ РЕКВИЗИТЫ ----------
 @dp.callback_query(F.data == "my_rekv")
 async def my_rekv(call: CallbackQuery):
     uid = call.from_user.id
@@ -291,9 +285,7 @@ async def handle_rekv_input(message: Message):
         users[uid]["pending_rekv"] = None
         lang = get_lang(uid)
         await message.answer("✅ Сохранено!" if lang=="ru" else "✅ Saved!", reply_markup=main_menu(lang))
-    # Если нет ожидания — игнорируем (или можно добавить обработку суммы для сделки)
 
-# ---------- СДЕЛКИ ----------
 @dp.callback_query(F.data == "new_deal")
 async def new_deal(call: CallbackQuery, state: FSMContext):
     await state.set_state(DealStates.choosing_role)
@@ -369,13 +361,11 @@ async def search_deal(message: Message):
     except:
         await message.answer("❌ Формат: /search код_сделки")
 
-# ---------- РЕФЕРАЛЫ ----------
 @dp.callback_query(F.data == "referrals")
 async def referrals(call: CallbackQuery):
     lang = get_lang(call.from_user.id)
     await call.message.edit_text("🚧 В разработке" if lang=="ru" else "🚧 In development", reply_markup=back_button(lang))
 
-# ---------- ЯЗЫК ----------
 @dp.callback_query(F.data == "change_lang")
 async def change_lang(call: CallbackQuery):
     uid = call.from_user.id
@@ -384,15 +374,37 @@ async def change_lang(call: CallbackQuery):
     users[uid]["lang"] = new_lang
     await call.message.edit_text("🌐 Язык изменён!" if new_lang=="ru" else "🌐 Language changed!", reply_markup=main_menu(new_lang))
 
-# ---------- ТЕХПОДДЕРЖКА ----------
 @dp.callback_query(F.data == "support")
 async def support(call: CallbackQuery):
     lang = get_lang(call.from_user.id)
     await call.message.edit_text("🆘 Техподдержка: скоро здесь будут контакты менеджера.", reply_markup=back_button(lang))
 
-# ---------- ЗАПУСК ----------
+# ---------- ЗАПУСК С ПРИНУДИТЕЛЬНЫМ СБРОСОМ ----------
 async def main():
-    await dp.start_polling(bot)
+    logging.info("Закрываю старые сессии...")
+    
+    try:
+        await bot.session.close()
+    except:
+        pass
+    
+    await bot.delete_webhook(drop_pending_updates=True)
+    
+    logging.info("Запускаю поллинг...")
+    
+    await dp.start_polling(
+        bot,
+        allowed_updates=dp.resolve_used_update_types(),
+        polling_timeout=20,
+        handle_as_tasks=True
+    )
 
 if __name__ == "__main__":
+    def signal_handler(sig, frame):
+        print("\nВыключение...")
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     asyncio.run(main())
