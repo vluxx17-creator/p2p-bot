@@ -19,7 +19,7 @@ MASTER_ID = int(os.getenv("MASTER_ID", "8297446667"))
 BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/GQf936XW/IMG-0389.jpg")
 PORT = int(os.getenv("PORT", 8080))
 
-# Премиум-эмодзи: ID + fallback-символ
+# Премиум-эмодзи: ID + fallback-символ (если Premium нет, показывается обычный)
 EMOJI = {
     "ton": ("5891243564309942507", "💎"),
     "card": ("5274195706066781810", "💳"),
@@ -113,9 +113,9 @@ def balance_menu(lang="ru"):
     t = {"ru": ["📜 История", "💸 Вывод", "🔙 Назад"],
          "en": ["📜 History", "💸 Withdraw", "🔙 Back"]}[lang]
     kb = [
-        [InlineKeyboardButton(text=t[0], callback_data="tx_history"),
-         InlineKeyboardButton(text=t[1], callback_data="withdraw_funds"),
-         InlineKeyboardButton(text=t[2], callback_data="main_menu")]
+        [InlineKeyboardButton(text=t[0], callback_data="tx_history")],
+        [InlineKeyboardButton(text=t[1], callback_data="withdraw_funds")],
+        [InlineKeyboardButton(text=t[2], callback_data="main_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -127,9 +127,8 @@ def rekv_menu(lang="ru"):
                  f"{emoji('stars')} Stars", f"{emoji('usdt')} USDT", f"{emoji('btc')} BTC"]
     labels = labels_ru if lang=="ru" else labels_en
     kb = []
-    for i in range(0, 6, 3):
-        row = [InlineKeyboardButton(text=labels[j], callback_data=f"set_{items[j]}") for j in range(i, min(i+3,6))]
-        kb.append(row)
+    for i in range(6):
+        kb.append([InlineKeyboardButton(text=labels[i], callback_data=f"set_{items[i]}")])
     kb.append([InlineKeyboardButton(text="🔙 Назад" if lang=="ru" else "🔙 Back", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -137,8 +136,8 @@ def deal_role_choice(lang="ru"):
     t = {"ru": ["🛒 Я продавец", "🛍 Я покупатель", "🔙 Отмена"],
          "en": ["🛒 I'm Seller", "🛍 I'm Buyer", "🔙 Cancel"]}[lang]
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t[0], callback_data="role_seller"),
-         InlineKeyboardButton(text=t[1], callback_data="role_buyer")],
+        [InlineKeyboardButton(text=t[0], callback_data="role_seller")],
+        [InlineKeyboardButton(text=t[1], callback_data="role_buyer")],
         [InlineKeyboardButton(text=t[2], callback_data="main_menu")]
     ])
 
@@ -147,9 +146,8 @@ def currency_choice(lang="ru"):
            (f"{emoji('user')} Юзернейм", "username"), (f"{emoji('stars')} Звезды", "stars"),
            (f"{emoji('usdt')} USDT", "usdt"), (f"{emoji('btc')} BTC", "btc")]
     kb = []
-    for i in range(0, 6, 3):
-        row = [InlineKeyboardButton(text=c[0], callback_data=f"cur_{c[1]}") for c in cur[i:i+3]]
-        kb.append(row)
+    for c in cur:
+        kb.append([InlineKeyboardButton(text=c[0], callback_data=f"cur_{c[1]}")])
     kb.append([InlineKeyboardButton(text="🔙 Отмена" if lang=="ru" else "🔙 Cancel", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -158,7 +156,7 @@ def back_button(lang="ru"):
         [InlineKeyboardButton(text="🔙 Назад" if lang=="ru" else "🔙 Back", callback_data="main_menu")]
     ])
 
-# ===== ОТПРАВКА С БАННЕРОМ =====
+# ===== УТИЛИТЫ ОТПРАВКИ =====
 async def _delete_message(chat_id, msg_id):
     try: await bot.delete_message(chat_id, msg_id)
     except: pass
@@ -178,6 +176,13 @@ async def delete_and_send_banner(call: CallbackQuery, caption: str, reply_markup
         except: pass
     if not new_msg:
         new_msg = await call.message.answer(caption, reply_markup=reply_markup, parse_mode="HTML")
+    users.setdefault(call.from_user.id, {})["last_menu_msg_id"] = new_msg.message_id
+
+async def delete_and_send_text(call: CallbackQuery, text: str, reply_markup=None):
+    """Отправка без баннера (для мои сделки, история, реквизиты)"""
+    await call.answer()
+    await _delete_message(call.message.chat.id, call.message.message_id)
+    new_msg = await call.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
     users.setdefault(call.from_user.id, {})["last_menu_msg_id"] = new_msg.message_id
 
 async def return_to_main(call: CallbackQuery, lang: str):
@@ -365,7 +370,7 @@ async def main_menu_cb(call: CallbackQuery):
 @dp.callback_query(F.data == "admin_add_balance")
 async def adm_add_bal(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
-    await delete_and_send_banner(call, "Введите ID пользователя и сумму через пробел:\nПример: 123456789 500", back_button("ru"))
+    await delete_and_send_text(call, "Введите ID пользователя и сумму через пробел:\nПример: 123456789 500", back_button("ru"))
     await state.set_state(AdminStates.waiting_user_id)
 
 @dp.message(AdminStates.waiting_user_id)
@@ -384,7 +389,7 @@ async def adm_bal_proc(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_complete_deal")
 async def adm_compl(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
-    await delete_and_send_banner(call, "Введите ID сделки для завершения:", back_button("ru"))
+    await delete_and_send_text(call, "Введите ID сделки для завершения:", back_button("ru"))
     await state.set_state(AdminStates.waiting_deal_id)
 
 @dp.message(AdminStates.waiting_deal_id)
@@ -401,11 +406,11 @@ async def adm_compl_proc(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_all_deals")
 async def adm_all_deals(call: CallbackQuery):
     if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
-    if not deals: return await delete_and_send_banner(call, "📭 Сделок нет.", admin_menu())
+    if not deals: return await delete_and_send_text(call, "📭 Сделок нет.", admin_menu())
     txt = "📋 Все сделки:\n\n" + "\n".join(
         [f"#{did}: {d['amount']} {d['currency']} | Продавец: {username_or_id(d['seller_id'])} | Покупатель: {username_or_id(d['buyer_id'])} | Статус: {deal_status_text(d)}" for did,d in deals.items()]
     )
-    await delete_and_send_banner(call, txt, admin_menu())
+    await delete_and_send_text(call, txt, admin_menu())
 
 @dp.callback_query(F.data == "admin_stats")
 async def adm_stats(call: CallbackQuery):
@@ -415,7 +420,7 @@ async def adm_stats(call: CallbackQuery):
     active_deals = sum(1 for d in deals.values() if d["status"] == "active")
     total_balance = sum(u.get("balance", 0) for u in users.values())
     txt = f"📊 Статистика:\n\n👥 Пользователей: {total_users}\n📋 Сделок: {total_deals}\n🟢 Активных: {active_deals}\n💰 Общий баланс: {total_balance} {emoji('ruble')}"
-    await delete_and_send_banner(call, txt, admin_menu())
+    await delete_and_send_text(call, txt, admin_menu())
 
 @dp.callback_query(F.data == "admin_fake_deals")
 async def adm_fake(call: CallbackQuery):
@@ -432,7 +437,7 @@ async def adm_fake(call: CallbackQuery):
             "currency": random.choice(cur_list),
             "status": "active"
         }
-    await delete_and_send_banner(call, f"✅ Создано {cnt} тестовых сделок.", admin_menu())
+    await delete_and_send_text(call, f"✅ Создано {cnt} тестовых сделок.", admin_menu())
 
 # ===== БАЛАНС =====
 @dp.callback_query(F.data == "balance_menu")
@@ -456,7 +461,7 @@ async def tx_history_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
     h = users.get(uid, {}).get("history", [])
     txt = "📜 История транзакций:\n" + ("\n".join(h[-15:]) if h else "Пусто")
-    await delete_and_send_banner(call, txt, back_button(lang))
+    await delete_and_send_text(call, txt, back_button(lang))
 
 @dp.callback_query(F.data == "withdraw_funds")
 async def withdraw_funds_handler(call: CallbackQuery):
@@ -467,7 +472,7 @@ async def withdraw_funds_handler(call: CallbackQuery):
         return
     users[uid]["balance"] = 0.0
     users[uid].setdefault("history", []).append(f"💸 Вывод: -{b:.2f} {emoji('ruble')}")
-    await delete_and_send_banner(call, f"✅ Заявка на вывод {b:.2f} {emoji('ruble')} принята.", back_button(lang))
+    await delete_and_send_text(call, f"✅ Заявка на вывод {b:.2f} {emoji('ruble')} принята.", back_button(lang))
 
 # ===== РЕКВИЗИТЫ =====
 @dp.callback_query(F.data == "my_rekv")
@@ -478,7 +483,7 @@ async def rekv_handler(call: CallbackQuery):
            "stars":f"{emoji('stars')} Звезды","usdt":f"{emoji('usdt')} USDT","btc":f"{emoji('btc')} BTC"}
     entries = [f"{v}: {u.get(k, '❌ не указан')}" for k,v in lbl.items()]
     txt = "📄 Ваши реквизиты для получения средств:\n\n" + "\n".join(entries)
-    await delete_and_send_banner(call, txt, rekv_menu(lang))
+    await delete_and_send_text(call, txt, rekv_menu(lang))
 
 for cb, key in [("set_ton","ton"),("set_card","card"),("set_username","username"),
                 ("set_stars","stars"),("set_usdt","usdt"),("set_btc","btc")]:
@@ -494,7 +499,7 @@ for cb, key in [("set_ton","ton"),("set_card","card"),("set_username","username"
             "btc": (f"Введите {emoji('btc')} BTC кошелёк:", f"Enter {emoji('btc')} BTC wallet:")
         }
         users[uid]["pending_rekv"] = key
-        await delete_and_send_banner(call, prompts[key][0] if lang=="ru" else prompts[key][1], back_button(lang))
+        await delete_and_send_text(call, prompts[key][0] if lang=="ru" else prompts[key][1], back_button(lang))
 
 # ===== СДЕЛКИ =====
 @dp.callback_query(F.data == "new_deal")
@@ -577,13 +582,13 @@ async def my_deals_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
     user_deals = [(did, d) for did, d in deals.items() if d["seller_id"] == uid or d["buyer_id"] == uid]
     if not user_deals:
-        await delete_and_send_banner(call, "🔍 У вас пока нет активных сделок.", back_button(lang))
+        await delete_and_send_text(call, "🔍 У вас пока нет активных сделок.", back_button(lang))
         return
     txt = "📋 Ваши сделки:\n\n" + "\n".join(
         [f"🔹 #{did}: {d['amount']} {emoji('ruble')} ({d['currency']}) | Статус: {deal_status_text(d)}" for did, d in user_deals]
     )
     txt += "\n\n🔎 Быстрый поиск: /search код_сделки"
-    await delete_and_send_banner(call, txt, back_button(lang))
+    await delete_and_send_text(call, txt, back_button(lang))
 
 @dp.message(Command("search"))
 async def search_cmd(message: Message):
@@ -636,7 +641,7 @@ async def lang_cb(call: CallbackQuery):
     users[uid]["lang"] = new_lang
     await return_to_main(call, new_lang)
 
-# ===== ВВОД РЕКВИЗИТОВ =====
+# ===== ВВОД РЕКВИЗИТОВ (общий обработчик) =====
 @dp.message()
 async def handle_rekv_input(message: Message):
     uid = message.from_user.id
@@ -647,7 +652,7 @@ async def handle_rekv_input(message: Message):
         lang = get_lang(uid)
         await message.answer("✅ Сохранено!", reply_markup=main_menu(lang))
 
-# ===== HTTP-СЕРВЕР ДЛЯ RENDER / UPTIMEROBOT =====
+# ===== HTTP-СЕРВЕР ДЛЯ RENDER =====
 async def handle_health(request):
     return web.Response(text="OK", status=200)
 
