@@ -17,13 +17,11 @@ from aiogram.client.default import DefaultBotProperties
 
 # ===== НАСТРОЙКИ =====
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8861957647:AAFhCw9cY6DgP_TGLXSdrjf7TIECimyr6-k")
-# Список администраторов (ID через запятую)
-ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8734750156,665396654").split(",")]
+INITIAL_ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8734750156,665396654").split(",")]
 BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/GQf936XW/IMG-0389.jpg")
 PORT = int(os.getenv("PORT", 8080))
 DATA_FILE = "data.json"
 
-# Обычные эмодзи
 EMOJI = {
     "ton": "💎",
     "card": "💳",
@@ -47,6 +45,7 @@ users = {}
 deals = {}
 deal_counter = 1000
 invite_codes = {}
+admin_ids = []
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
@@ -59,13 +58,14 @@ def save_data():
         "users": users,
         "deals": deals,
         "deal_counter": deal_counter,
-        "invite_codes": invite_codes
+        "invite_codes": invite_codes,
+        "admin_ids": admin_ids
     }
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def load_data():
-    global users, deals, deal_counter, invite_codes
+    global users, deals, deal_counter, invite_codes, admin_ids
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -73,10 +73,14 @@ def load_data():
         deals = {int(k): v for k, v in data.get("deals", {}).items()}
         deal_counter = data.get("deal_counter", 1000)
         invite_codes = data.get("invite_codes", {})
+        admin_ids = data.get("admin_ids", INITIAL_ADMIN_IDS)
+    else:
+        admin_ids = INITIAL_ADMIN_IDS
+        save_data()
 
 # ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
 def is_admin(user_id):
-    return user_id in ADMIN_IDS
+    return user_id in admin_ids
 
 def emoji(name):
     return EMOJI.get(name, "❓")
@@ -106,6 +110,8 @@ class DealStates(StatesGroup):
 class AdminStates(StatesGroup):
     waiting_user_id = State()
     waiting_deal_id = State()
+    waiting_admin_add = State()
+    waiting_admin_remove = State()
 
 class SearchDeal(StatesGroup):
     waiting_code = State()
@@ -161,6 +167,9 @@ def admin_menu():
         [InlineKeyboardButton(text="📋 Все сделки", callback_data="admin_all_deals")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="🔢 Тестовые сделки", callback_data="admin_fake_deals")],
+        [InlineKeyboardButton(text="➕ Выдать админку", callback_data="admin_add_admin")],
+        [InlineKeyboardButton(text="➖ Убрать админку", callback_data="admin_remove_admin")],
+        [InlineKeyboardButton(text="👥 Список админов", callback_data="admin_list_admins")],
         [InlineKeyboardButton(text="🔙 В главное меню", callback_data="main_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -514,8 +523,8 @@ async def adm_fake(call: CallbackQuery):
             code = generate_invite_code()
         invite_codes[code] = deal_counter
         deals[deal_counter] = {
-            "seller_id": random.choice(list(users.keys())) if users else ADMIN_IDS[0],
-            "buyer_id": random.choice(list(users.keys())) if users else ADMIN_IDS[0],
+            "seller_id": random.choice(list(users.keys())) if users else admin_ids[0],
+            "buyer_id": random.choice(list(users.keys())) if users else admin_ids[0],
             "amount": round(random.uniform(100, 10000), 2),
             "currency": random.choice(cur_list),
             "status": "active",
@@ -524,6 +533,65 @@ async def adm_fake(call: CallbackQuery):
         }
     save_data()
     await delete_and_send_text(call, f"✅ Создано {cnt} тестовых сделок.", admin_menu())
+
+# ===== УПРАВЛЕНИЕ АДМИНАМИ =====
+@dp.callback_query(F.data == "admin_add_admin")
+async def admin_add_admin_start(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("❌", show_alert=True)
+    await call.answer()
+    await call.message.answer("Введите ID пользователя, которого нужно сделать администратором:")
+    await state.set_state(AdminStates.waiting_admin_add)
+
+@dp.message(AdminStates.waiting_admin_add)
+async def admin_add_admin_process(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        new_admin = int(message.text.strip())
+        if new_admin in admin_ids:
+            await message.answer("❌ Этот пользователь уже администратор.")
+        else:
+            admin_ids.append(new_admin)
+            save_data()
+            await message.answer(f"✅ Пользователь {new_admin} теперь администратор.")
+    except:
+        await message.answer("❌ Введите корректный ID.")
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_remove_admin")
+async def admin_remove_admin_start(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("❌", show_alert=True)
+    await call.answer()
+    await call.message.answer("Введите ID администратора, которого нужно удалить:")
+    await state.set_state(AdminStates.waiting_admin_remove)
+
+@dp.message(AdminStates.waiting_admin_remove)
+async def admin_remove_admin_process(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        rem_admin = int(message.text.strip())
+        if rem_admin not in admin_ids:
+            await message.answer("❌ Этот пользователь не является администратором.")
+        elif len(admin_ids) == 1:
+            await message.answer("❌ Нельзя удалить последнего администратора.")
+        else:
+            admin_ids.remove(rem_admin)
+            save_data()
+            await message.answer(f"✅ Администратор {rem_admin} удалён.")
+    except:
+        await message.answer("❌ Введите корректный ID.")
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_list_admins")
+async def admin_list_admins(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("❌", show_alert=True)
+    text = "👥 Текущие администраторы:\n" + "\n".join(f"• {uid}" for uid in admin_ids)
+    await call.message.answer(text)
+    await call.answer()
 
 # ===== БАЛАНС =====
 @dp.callback_query(F.data == "balance_menu")
@@ -817,7 +885,7 @@ async def lang_cb(call: CallbackQuery):
     save_data()
     await return_to_main(call, new_lang)
 
-# ===== ВВОД РЕКВИЗИТОВ =====
+# ===== ВВОД РЕКВИЗИТОВ (общий обработчик) =====
 @dp.message()
 async def handle_rekv_input(message: Message):
     uid = str(message.from_user.id)
