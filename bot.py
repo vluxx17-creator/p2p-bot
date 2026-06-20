@@ -16,8 +16,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
 # ===== НАСТРОЙКИ =====
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8916641100:AAGTlz5A0Xr3ShfmG197dMN6Kp359c-NMxc")
-ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8734750156").split(",")]
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8861957647:AAFhCw9cY6DgP_TGLXSdrjf7TIECimyr6-k")
+# Список администраторов (ID через запятую)
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8734750156,665396654").split(",")]
 BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/GQf936XW/IMG-0389.jpg")
 PORT = int(os.getenv("PORT", 8080))
 DATA_FILE = "data.json"
