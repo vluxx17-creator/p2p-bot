@@ -8,6 +8,6 @@ services:
       - key: BOT_TOKEN
         value: 8862273506:AAHvSY7aLzmiTr_qnSLm10JzJWKey8TSfzU
       - key: MASTER_ID
-        value: 8297446667
+        value: 8297446667 8734750156
       - key: BANNER_URL
         value: https://i.ibb.co/W4xFfP0j/banner.png
