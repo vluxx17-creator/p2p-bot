@@ -52,7 +52,7 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# ===== СОХРАНЕНИЕ И ЗАГРУЗКА ДАННЫХ =====
+# ===== СОХРАНЕНИЕ И ЗАГРУЗКА =====
 def save_data():
     data = {
         "users": users,
@@ -69,9 +69,7 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         users = data.get("users", {})
-        deals = data.get("deals", {})
-        # превращаем ключи сделок обратно в int
-        deals = {int(k): v for k, v in deals.items()}
+        deals = {int(k): v for k, v in data.get("deals", {}).items()}
         deal_counter = data.get("deal_counter", 1000)
         invite_codes = data.get("invite_codes", {})
 
@@ -415,7 +413,7 @@ async def join_by_hashtag(message: Message):
     code = message.text.strip()[1:9]
     await join_deal_by_code(message, code)
 
-# ===== АДМИН-КОМАНДЫ =====
+# ===== АДМИН-КОМАНДЫ (без изменений) =====
 @dp.message(Command("admin"))
 async def admin_cmd(message: Message):
     update_premium(message.from_user)
@@ -691,7 +689,8 @@ async def amount_entered(message: Message, state: FSMContext):
         f"Example: https://t.me/nft/\n"
         f"or just a text description"
     )
-    await delete_and_send_banner(message, txt, kb)
+    # Отправляем новое сообщение с клавиатурой, не удаляя предыдущее
+    await message.answer(txt, reply_markup=kb)
     await state.set_state(DealStates.waiting_description)
 
 @dp.message(DealStates.waiting_description)
@@ -740,7 +739,7 @@ async def description_entered(message: Message, state: FSMContext):
     await state.clear()
     save_data()
 
-# ===== МОИ СДЕЛКИ (НОВЫЙ ИНТЕРФЕЙС) =====
+# ===== МОИ СДЕЛКИ =====
 @dp.callback_query(F.data == "my_deals")
 async def my_deals_handler(call: CallbackQuery):
     update_premium(call.from_user)
@@ -751,7 +750,6 @@ async def my_deals_handler(call: CallbackQuery):
 
     kb = []
     if user_deals:
-        page = 0
         for did, d in user_deals[:5]:
             status_icon = "✅" if d["status"] == "completed" else "❌"
             kb.append([InlineKeyboardButton(
@@ -773,7 +771,7 @@ async def my_deals_handler(call: CallbackQuery):
     )
     await delete_and_send_text(call, caption, InlineKeyboardMarkup(inline_keyboard=kb))
 
-# ===== ПОИСК СДЕЛКИ ПО КОДУ =====
+# ===== ПОИСК СДЕЛКИ =====
 @dp.callback_query(F.data == "search_deal_code")
 async def search_deal_start(call: CallbackQuery, state: FSMContext):
     await call.answer()
@@ -860,6 +858,10 @@ async def lang_cb(call: CallbackQuery):
 async def handle_rekv_input(message: Message):
     update_premium(message.from_user)
     uid = str(message.from_user.id)
+    # Проверяем, что нет активного состояния FSM, чтобы не мешать созданию сделки
+    current_state = await dp.storage.get_state(uid)
+    if current_state is not None:
+        return  # если пользователь в процессе создания сделки, не обрабатываем как реквизит
     if uid in users and users[uid].get("pending_rekv"):
         key = users[uid]["pending_rekv"]
         users[uid][key] = message.text
