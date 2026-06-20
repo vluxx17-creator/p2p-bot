@@ -17,12 +17,13 @@ from aiogram.client.default import DefaultBotProperties
 
 # ===== НАСТРОЙКИ =====
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8916641100:AAGTlz5A0Xr3ShfmG197dMN6Kp359c-NMxc")
-MASTER_ID = int(os.getenv("MASTER_ID", "8297446667" "8734750156"))
+# Список ID администраторов (через запятую)
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8734750156").split(",")]
 BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/GQf936XW/IMG-0389.jpg")
 PORT = int(os.getenv("PORT", 8080))
 DATA_FILE = "data.json"
 
-# Обычные эмодзи (без премиум-тегов)
+# Обычные эмодзи
 EMOJI = {
     "ton": "💎",
     "card": "💳",
@@ -74,6 +75,9 @@ def load_data():
         invite_codes = data.get("invite_codes", {})
 
 # ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+def is_admin(user_id):
+    return user_id in ADMIN_IDS
+
 def emoji(name):
     return EMOJI.get(name, "❓")
 
@@ -396,12 +400,14 @@ async def join_by_hashtag(message: Message):
 # ===== АДМИН-КОМАНДЫ =====
 @dp.message(Command("admin"))
 async def admin_cmd(message: Message):
-    if message.from_user.id != MASTER_ID: return await message.answer("❌ Нет доступа.")
+    if not is_admin(message.from_user.id):
+        return await message.answer("❌ Нет доступа.")
     await message.answer(ADMIN_TEXT, reply_markup=admin_menu())
 
 @dp.message(Command("masterb"))
 async def masterb_cmd(message: Message):
-    if message.from_user.id != MASTER_ID: return await message.answer("❌ Нет доступа.")
+    if not is_admin(message.from_user.id):
+        return await message.answer("❌ Нет доступа.")
     try:
         _, uid_s, amt_s = message.text.split()
         uid, amt = int(uid_s), float(amt_s)
@@ -416,7 +422,8 @@ async def masterb_cmd(message: Message):
 
 @dp.message(Command("giveMas"))
 async def givemas_cmd(message: Message):
-    if message.from_user.id != MASTER_ID: return await message.answer("❌ Нет доступа.")
+    if not is_admin(message.from_user.id):
+        return await message.answer("❌ Нет доступа.")
     try:
         _, did_s = message.text.split()
         did = int(did_s)
@@ -433,13 +440,15 @@ async def main_menu_cb(call: CallbackQuery):
 # ===== АДМИН КОЛБЭКИ =====
 @dp.callback_query(F.data == "admin_add_balance")
 async def adm_add_bal(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
+    if not is_admin(call.from_user.id):
+        return await call.answer("❌", show_alert=True)
     await delete_and_send_text(call, "Введите ID пользователя и сумму через пробел:\nПример: 123456789 500", back_button("ru"))
     await state.set_state(AdminStates.waiting_user_id)
 
 @dp.message(AdminStates.waiting_user_id)
 async def adm_bal_proc(message: Message, state: FSMContext):
-    if message.from_user.id != MASTER_ID: return
+    if not is_admin(message.from_user.id):
+        return
     try:
         uid_s, amt_s = message.text.split()
         uid, amt = int(uid_s), float(amt_s)
@@ -453,13 +462,15 @@ async def adm_bal_proc(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_complete_deal")
 async def adm_compl(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
+    if not is_admin(call.from_user.id):
+        return await call.answer("❌", show_alert=True)
     await delete_and_send_text(call, "Введите ID сделки для завершения:", back_button("ru"))
     await state.set_state(AdminStates.waiting_deal_id)
 
 @dp.message(AdminStates.waiting_deal_id)
 async def adm_compl_proc(message: Message, state: FSMContext):
-    if message.from_user.id != MASTER_ID: return
+    if not is_admin(message.from_user.id):
+        return
     try:
         did = int(message.text.strip())
         if did not in deals or deals[did]["status"]!="active":
@@ -470,7 +481,8 @@ async def adm_compl_proc(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_all_deals")
 async def adm_all_deals(call: CallbackQuery):
-    if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
+    if not is_admin(call.from_user.id):
+        return await call.answer("❌", show_alert=True)
     if not deals: return await delete_and_send_text(call, "📭 Сделок нет.", admin_menu())
     txt = "📋 Все сделки:\n\n" + "\n".join(
         [f"<b>#{did}</b>: {d['amount']} {d['currency']} | Продавец: {username_or_id(d['seller_id'])} | Покупатель: {username_or_id(d['buyer_id'])} | Статус: {deal_status_text(d)}" for did,d in deals.items()]
@@ -479,7 +491,8 @@ async def adm_all_deals(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_stats")
 async def adm_stats(call: CallbackQuery):
-    if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
+    if not is_admin(call.from_user.id):
+        return await call.answer("❌", show_alert=True)
     total_users = len(users)
     total_deals = len(deals)
     active_deals = sum(1 for d in deals.values() if d["status"] == "active")
@@ -489,7 +502,8 @@ async def adm_stats(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_fake_deals")
 async def adm_fake(call: CallbackQuery):
-    if call.from_user.id != MASTER_ID: return await call.answer("❌", show_alert=True)
+    if not is_admin(call.from_user.id):
+        return await call.answer("❌", show_alert=True)
     global deal_counter
     cur_list = ["ton","card","username","stars","usdt","btc"]
     cnt = random.randint(0, 40)
@@ -500,8 +514,8 @@ async def adm_fake(call: CallbackQuery):
             code = generate_invite_code()
         invite_codes[code] = deal_counter
         deals[deal_counter] = {
-            "seller_id": random.choice(list(users.keys())) if users else MASTER_ID,
-            "buyer_id": random.choice(list(users.keys())) if users else MASTER_ID,
+            "seller_id": random.choice(list(users.keys())) if users else ADMIN_IDS[0],
+            "buyer_id": random.choice(list(users.keys())) if users else ADMIN_IDS[0],
             "amount": round(random.uniform(100, 10000), 2),
             "currency": random.choice(cur_list),
             "status": "active",
@@ -613,7 +627,6 @@ async def currency_chosen(call: CallbackQuery, state: FSMContext):
     await delete_and_send_banner(call, f"💰 Введите сумму сделки (в {emoji('ruble')}):", back_button(lang))
     await state.set_state(DealStates.waiting_amount)
 
-# Обработчики кнопок на шаге суммы
 @dp.callback_query(F.data == "new_deal", DealStates.waiting_amount)
 async def back_to_new_deal_from_amount(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -808,7 +821,6 @@ async def lang_cb(call: CallbackQuery):
 @dp.message()
 async def handle_rekv_input(message: Message):
     uid = str(message.from_user.id)
-    # не мешаем активным состояниям FSM
     current_state = await dp.storage.get_state(uid)
     if current_state is not None:
         return
