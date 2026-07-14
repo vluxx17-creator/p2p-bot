@@ -112,6 +112,7 @@ class AdminStates(StatesGroup):
     waiting_deal_id = State()
     waiting_admin_add = State()
     waiting_admin_remove = State()
+    waiting_complete_deal = State()
 
 class SearchDeal(StatesGroup):
     waiting_code = State()
@@ -127,6 +128,7 @@ def username_or_id(uid):
 
 def deal_status_text(deal):
     if deal["status"] == "completed": return "Завершена ✅"
+    if deal["status"] == "pending_completion": return "Ожидание подтверждения"
     if deal["status"] == "active":
         if deal["seller_id"] is None: return "Ожидание продавца"
         if deal["buyer_id"] is None: return "Ожидание покупателя"
@@ -304,7 +306,7 @@ async def complete_deal_logic(deal_id, msg=None, call=None):
     except: pass
     save_data()
 
-# ===== ОБРАБОТЧИК ПРИСОЕДИНЕНИЯ ПО КОДУ (ОБНОВЛЁН) =====
+# ===== ОБРАБОТЧИК ПРИСОЕДИНЕНИЯ ПО КОДУ =====
 async def join_deal_by_code(message: Message, code: str):
     uid = str(message.from_user.id)
     deal_id = invite_codes.get(code)
@@ -313,12 +315,17 @@ async def join_deal_by_code(message: Message, code: str):
     deal = deals[deal_id]
     if deal["status"] != "active":
         return await message.answer("❌ Эта сделка уже не активна.")
+    if str(uid) == deal["seller_id"]:
+        return await message.answer("❌ Вы не можете присоединиться к своей сделке как вторая сторона.")
+    if str(uid) == deal["buyer_id"]:
+        return await message.answer("❌ Вы уже присоединились к этой сделке.")
+
     if deal["seller_id"] is None and deal["buyer_id"] != uid:
         deal["seller_id"] = uid
     elif deal["buyer_id"] is None and deal["seller_id"] != uid:
         deal["buyer_id"] = uid
     else:
-        return await message.answer("❌ Вы уже участвуете или сделка заполнена.")
+        return await message.answer("❌ Сделка уже заполнена.")
 
     if deal["seller_id"] is not None and deal["buyer_id"] is not None:
         deal["status"] = "active"
@@ -328,7 +335,7 @@ async def join_deal_by_code(message: Message, code: str):
         buyer_username = username_or_id(buyer_id)
         buyer_completed = users.get(str(buyer_id), {}).get("completed_deals", 0)
 
-        # Сообщение продавцу с кнопкой "Я знаю"
+        # Продавцу
         msg_text = (
             f"<b>Пользователь присоединился к вашей сделке <code>{memo}</code></b>\n"
             f"• Количество сделок покупателя: {buyer_completed}\n"
@@ -345,7 +352,7 @@ async def join_deal_by_code(message: Message, code: str):
         except:
             pass
 
-        # Сообщение покупателю с кнопкой "Я оплатил"
+        # Покупателю
         await message.answer(
             f"✅ <b>Вы присоединились к сделке #{deal_id}!</b>\n\n"
             f"Продавец: {username_or_id(seller_id)}\n"
@@ -468,8 +475,8 @@ async def givemas_cmd(message: Message):
     try:
         _, did_s = message.text.split()
         did = int(did_s)
-        if did not in deals or deals[did]["status"] != "active":
-            return await message.answer("❌ Сделка не найдена или неактивна.")
+        if did not in deals or deals[did]["status"] not in ["active", "pending_completion"]:
+            return await message.answer("❌ Сделка не найдена или не может быть завершена.")
         await complete_deal_logic(did, msg=message)
     except: await message.answer("❌ Формат: /giveMas deal_id")
 
@@ -508,7 +515,7 @@ async def admin_remove_secret(message: Message):
     except:
         await message.answer("❌ Формат: /adminteam213 <user_id>")
 
-# ===== КОМАНДА /otvet ДЛЯ ПРЕДУПРЕЖДЕНИЯ ПРОДАВЦА =====
+# ===== КОМАНДА /otvet =====
 @dp.message(Command("otvet"))
 async def admin_warning(message: Message):
     if not is_admin(message.from_user.id):
@@ -531,7 +538,7 @@ async def admin_warning(message: Message):
     except:
         await message.answer("❌ Формат: /otvet <id сделки>")
 
-# ===== ОБРАБОТЧИКИ НОВЫХ КНОПОК =====
+# ===== ОБРАБОТЧИКИ КНОПОК =====
 @dp.callback_query(F.data.startswith("acknowledge_"))
 async def process_acknowledge(call: CallbackQuery):
     deal_id = int(call.data.split("_")[1])
@@ -586,15 +593,29 @@ async def process_transfer(call: CallbackQuery):
         await call.answer("Эта кнопка не для вас.", show_alert=True)
         return
 
+    deal["status"] = "pending_completion"
+    save_data()
+
     buyer_id = deal["buyer_id"]
     await bot.send_message(
         buyer_id,
-        "<b>✅ Продавец подтвердил передачу товара.</b>\n<i>Проверьте получение. При проблемах обратитесь в поддержку.</i>"
+        "<b>✅ Продавец подтвердил передачу товара.</b>\n<i>Сделка ожидает подтверждения администратором.</i>"
     )
     await bot.send_message(
         deal["seller_id"],
-        "<b>✅ Спасибо!</b>\n<i>Отправьте скриншот покупателю как подтверждение.</i>"
+        "<b>✅ Вы подтвердили передачу.</b>\n<i>Ожидайте завершения сделки администратором.</i>"
     )
+    for admin_id in admin_ids:
+        try:
+            await bot.send_message(admin_id,
+                f"🔔 Сделка #{deal_id} ожидает завершения.\n"
+                f"Продавец: {username_or_id(deal['seller_id'])}\n"
+                f"Покупатель: {username_or_id(buyer_id)}\n"
+                f"Сумма: {deal['amount']} {deal['currency']}\n"
+                f"Используйте /giveMas {deal_id} для завершения."
+            )
+        except:
+            pass
     await call.message.edit_reply_markup(reply_markup=None)
     await call.answer()
 
@@ -631,16 +652,16 @@ async def adm_compl(call: CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
         return await call.answer("❌", show_alert=True)
     await delete_and_send_text(call, "Введите ID сделки для завершения:", back_button("ru"))
-    await state.set_state(AdminStates.waiting_deal_id)
+    await state.set_state(AdminStates.waiting_complete_deal)
 
-@dp.message(AdminStates.waiting_deal_id)
+@dp.message(AdminStates.waiting_complete_deal)
 async def adm_compl_proc(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     try:
         did = int(message.text.strip())
-        if did not in deals or deals[did]["status"]!="active":
-            return await message.answer("❌ Сделка не найдена или неактивна.", reply_markup=admin_menu())
+        if did not in deals or deals[did]["status"] not in ["active", "pending_completion"]:
+            return await message.answer("❌ Сделка не найдена или не может быть завершена.", reply_markup=admin_menu())
         await complete_deal_logic(did, msg=message)
     except: await message.answer("❌ Введите корректный ID сделки.")
     await state.clear()
@@ -661,9 +682,10 @@ async def adm_stats(call: CallbackQuery):
         return await call.answer("❌", show_alert=True)
     total_users = len(users)
     total_deals = len(deals)
-    active_deals = sum(1 for d in deals.values() if d["status"] == "active")
+    active_deals = sum(1 for d in deals.values() if d["status"] in ["active", "pending_completion"])
+    completed_deals = sum(1 for d in deals.values() if d["status"] == "completed")
     total_balance = sum(u.get("balance", 0) for u in users.values())
-    txt = f"📊 Статистика:\n\n<b>Пользователей:</b> {total_users}\n<b>Сделок:</b> {total_deals}\n<b>Активных:</b> {active_deals}\n<b>Общий баланс:</b> {total_balance} {emoji('ruble')}"
+    txt = f"📊 Статистика:\n\n<b>Пользователей:</b> {total_users}\n<b>Всего сделок:</b> {total_deals}\n<b>Активных:</b> {active_deals}\n<b>Завершённых:</b> {completed_deals}\n<b>Общий баланс:</b> {total_balance} {emoji('ruble')}"
     await delete_and_send_text(call, txt, admin_menu())
 
 @dp.callback_query(F.data == "admin_fake_deals")
@@ -880,15 +902,15 @@ async def description_entered(message: Message, state: FSMContext):
     bot_username = (await bot.me()).username
     join_link = f"https://t.me/{bot_username}?start=join_{code}"
     text = (
-        f"✅ Сделка #{deal_counter} успешно создана!\n\n"
-        f"🛒 Роль: {'Продавец' if role=='seller' else 'Покупатель'}\n"
-        f"🇷🇺 Валюта: {currency}\n"
-        f"💰 Сумма: {amount} {emoji('ruble')}\n"
-        f"✍️ Описание: {description}\n\n"
-        f"🔗 Ссылка для второй стороны:\n{join_link}\n\n"
+        f"✅ <b>Сделка #{deal_counter} успешно создана!</b>\n\n"
+        f"🛒 <b>Роль:</b> {'Продавец' if role=='seller' else 'Покупатель'}\n"
+        f"🇷🇺 <b>Валюта:</b> {currency}\n"
+        f"💰 <b>Сумма:</b> {amount} {emoji('ruble')}\n"
+        f"✍️ <b>Описание:</b> {description}\n\n"
+        f"🔗 <b>Ссылка для второй стороны:</b>\n{join_link}\n\n"
         f"Или пригласите через инлайн: @{bot_username} #{code}"
     )
-    await message.answer(text, reply_markup=main_menu(lang))
+    await message.answer(text, parse_mode="HTML")
     await state.clear()
     save_data()
 
