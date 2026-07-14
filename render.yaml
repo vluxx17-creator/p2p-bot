@@ -6,8 +6,8 @@ services:
     startCommand: python bot.py
     envVars:
       - key: BOT_TOKEN
-        value: 8923875062:AAHHU5XBuZLrg1dmLXLGEbMRxSxe-ap_uIk
+        value: 8835759226:AAHawpWNNnue_FtqEhvn7q2O93UOi4EcB4g
       - key: ADMIN_IDS
-        value: 8297446667,8734750156,665396654
+        value: 8297446667,8400055743
       - key: BANNER_URL
         value: https://i.ibb.co/gbXTDz0f/IMG-1254.jpg
