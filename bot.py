@@ -16,8 +16,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
 # ===== НАСТРОЙКИ =====
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8923875062:AAHHU5XBuZLrg1dmLXLGEbMRxSxe-ap_uIk")
-INITIAL_ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8734750156,665396654").split(",")]
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8835759226:AAHawpWNNnue_FtqEhvn7q2O93UOi4EcB4g")
+# Администраторы по умолчанию (8297446667 – основной, 8400055743 – добавленный)
+INITIAL_ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8400055743").split(",")]
 BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/gbXTDz0f/IMG-1254.jpg")
 PORT = int(os.getenv("PORT", 8080))
 DATA_FILE = "data.json"
@@ -95,7 +96,7 @@ def welcome_text():
         "1⃣ Автоматические сделки с NFT и подарками\n"
         f"2⃣ {shield_emoji()} Полная защита обеих сторон\n"
         f"3⃣ {emoji('coin')} Реферальная программа — 50% от комиссии\n"
-        f"4⃣ {emoji('package')} Все сделки проходят между покупателем и продавцем!</blockquote>\n\n"
+        f"4⃣ {emoji('package')} Все сделки проходят через менеджера</blockquote>\n\n"
         f"{emoji('lamp')} Наш канал ─ @ggsel"
     )
 
@@ -593,7 +594,7 @@ async def admin_list_admins(call: CallbackQuery):
     await call.message.answer(text)
     await call.answer()
 
-# ===== ТЕХПОДДЕРЖКА (без указания конкретного юзернейма) =====
+# ===== ТЕХПОДДЕРЖКА =====
 @dp.callback_query(F.data == "support")
 async def support_handler(call: CallbackQuery):
     await call.answer("ℹ️ Обратитесь к менеджеру через наш канал @ggsel", show_alert=True)
