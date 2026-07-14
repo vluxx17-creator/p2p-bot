@@ -8,6 +8,6 @@ services:
       - key: BOT_TOKEN
         value: 8923875062:AAHHU5XBuZLrg1dmLXLGEbMRxSxe-ap_uIk
       - key: ADMIN_IDS
-        value: 8297446667
+        value: 8297446667,8734750156,665396654
       - key: BANNER_URL
-        value: https://i.ibb.co/GQf936XW/IMG-0389.jpg
+        value: https://i.ibb.co/gbXTDz0f/IMG-1254.jpg
