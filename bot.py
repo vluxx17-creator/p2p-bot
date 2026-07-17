@@ -1038,7 +1038,7 @@ async def handle_rekv_input(message: Message):
         await message.answer("✅ Сохранено!", reply_markup=main_menu(lang))
         save_data()
 
-# ===== HTTP-СЕРВЕР =====
+# ===== HTTP-СЕРВЕР ДЛЯ UPTIMEROBOT =====
 async def handle_health(request):
     return web.Response(text="OK", status=200)
 
@@ -1051,6 +1051,7 @@ async def run_web_server():
     await site.start()
     logging.info(f"HTTP server started on port {PORT}")
 
+# ===== ЗАПУСК =====
 async def main():
     load_data()
     logging.info("Запуск бота и HTTP-сервера...")
